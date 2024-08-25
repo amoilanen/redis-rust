@@ -1,3 +1,6 @@
+use crate::error::RedisError;
+
+#[derive(Debug, PartialEq)]
 struct SimpleString {
     value: Vec<u8>
 }
@@ -10,7 +13,7 @@ impl SimpleString {
         result.extend("\r\n".as_bytes());
         result
     }
-    fn parse(input: &Vec<u8>) -> Result<SimpleString, anyhow::Error> {
+    fn parse(input: &Vec<u8>) -> Result<SimpleString, RedisError> {
         Ok(SimpleString {
             value: Vec::new()
         })
@@ -19,6 +22,8 @@ impl SimpleString {
 
 #[cfg(test)]
 mod tests {
+    use crate::error::RedisError;
+
     use super::*;
 
     #[test]
@@ -33,11 +38,28 @@ mod tests {
 
     #[test]
     fn should_parse_valid_simple_string() {
-        //TODO:
+        let input = "+hello\r\n".as_bytes().to_vec();
+        let result = SimpleString::parse(&input).unwrap();
+        assert_eq!(result, SimpleString {
+            value: "hello".as_bytes().to_vec()
+        })
+    }
+
+    #[test]
+    fn should_fail_parsing_if_more_bytes_are_provided() {
+        let input = "+hello\r\n+world\r\n";
+        let error = SimpleString::parse(&input.as_bytes().to_vec()).unwrap_err();
+        assert_eq!(error, RedisError {
+            message: format!("Invalid SimpleString {:?}", input)
+        })
     }
 
     #[test]
     fn should_fail_parsing_invalid_simple_string() {
-        //TODO:
+        let input = ":+5\r\n";
+        let error = SimpleString::parse(&input.as_bytes().to_vec()).unwrap_err();
+        assert_eq!(error, RedisError {
+            message: format!("Invalid SimpleString {:?}", input)
+        })
     }
 }

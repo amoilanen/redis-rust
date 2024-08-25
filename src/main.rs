@@ -1,6 +1,7 @@
 use std::net::TcpListener;
 
 mod protocol;
+mod error;
 
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
