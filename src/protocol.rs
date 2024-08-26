@@ -8,15 +8,31 @@ struct SimpleString {
 impl SimpleString {
     fn serialize(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::new();
-        result.push('+' as u8);
+        result.push(b'+');
         result.extend(self.value.as_slice());
         result.extend("\r\n".as_bytes());
         result
     }
     fn parse(input: &Vec<u8>) -> Result<SimpleString, RedisError> {
-        Ok(SimpleString {
-            value: Vec::new()
-        })
+        let mut can_parse = false;
+        if input.len() >= 3 && input[0] == b'+' {
+            if let Some(r_index) = input.iter().position(|&ch| ch == b'\r') {
+                let n_index = r_index + 1;
+                if n_index == input.len() - 1 && input[n_index] == b'\n' {
+                    can_parse = true;
+                }
+            }
+        }
+
+        if can_parse {
+            Ok(SimpleString {
+                value: input[1..(input.len() - 2)].to_vec()
+            })
+        } else {
+            Err(RedisError {
+                message: format!("Invalid SimpleString '{}'", String::from_utf8_lossy(&input.clone()))
+            })
+        }
     }
 }
 
@@ -50,7 +66,7 @@ mod tests {
         let input = "+hello\r\n+world\r\n";
         let error = SimpleString::parse(&input.as_bytes().to_vec()).unwrap_err();
         assert_eq!(error, RedisError {
-            message: format!("Invalid SimpleString {:?}", input)
+            message: format!("Invalid SimpleString '{}'", input)
         })
     }
 
@@ -59,7 +75,7 @@ mod tests {
         let input = ":+5\r\n";
         let error = SimpleString::parse(&input.as_bytes().to_vec()).unwrap_err();
         assert_eq!(error, RedisError {
-            message: format!("Invalid SimpleString {:?}", input)
+            message: format!("Invalid SimpleString '{}'", input)
         })
     }
 }
