@@ -1,21 +1,46 @@
-use crate::error::RedisError;
+use anyhow::Context;
 
-fn starts_with_symbol_and_ends_with_r_n(symbol: u8, input: &Vec<u8>) -> bool {
-    let mut matches = false;
-    if input.len() >= 3 && input[0] == symbol {
-        if let Some(r_index) = input.iter().position(|&ch| ch == b'\r') {
-            let n_index = r_index + 1;
-            if n_index == input.len() - 1 && input[n_index] == b'\n' {
-                matches = true;
-            }
-        }
-    }
-    matches
-}
+use crate::error::RedisError;
 
 #[derive(Debug, PartialEq)]
 struct Integer {
     value: i64
+}
+
+fn read_and_assert_symbol(input: &Vec<u8>, symbol: u8, position: usize) -> Result<usize, anyhow::Error> {
+    let error_message = format!("Expected symbol '{}' in '{}' at position {}", symbol as char, String::from_utf8_lossy(&input.clone()), position);
+    let &actual_symbol = input.get(position).ok_or::<anyhow::Error>(RedisError {
+        message: error_message.clone()
+    }.into())?;
+    if actual_symbol != symbol {
+        Err(RedisError {
+            message: error_message
+        }.into())
+    } else {
+        Ok(position + 1)
+    }
+}
+
+fn read_until(input: &Vec<u8>, terminator: &Vec<u8>, position: usize) -> usize {
+    let mut current = position;
+    let mut end_index: Option<usize> = None;
+    while end_index == None && current < input.len() {
+        let mut terminator_current = 0;
+        while current < input.len() && terminator_current < terminator.len() && input[current] == terminator[terminator_current] {
+            current = current + 1;
+            terminator_current = terminator_current + 1;
+        }
+        if terminator_current == terminator.len() && terminator.len() > 0 {
+            end_index = Some(current - terminator.len())
+        } else {
+            current = current + 1
+        }
+    }
+    if let Some(new_position) = end_index {
+        new_position
+    } else {
+        current
+    }
 }
 
 impl Integer {
@@ -30,15 +55,15 @@ impl Integer {
         result
     }
     fn parse(input: &Vec<u8>) -> Result<Integer, anyhow::Error> {
-        if starts_with_symbol_and_ends_with_r_n(b':', input) {
-            Ok(Integer {
-                value: std::str::from_utf8(&input[1..(input.len() - 2)])?.parse()?
-            })
-        } else {
-            Err(RedisError {
-                message: format!("Invalid Integer '{}'", String::from_utf8_lossy(&input.clone()))
-            }.into())
-        }
+        let error_message = format!("Invalid Integer '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b':', 0).context(error_message.clone())?;
+        let value_start = 1;
+        let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
+        read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
+        Ok(Integer {
+            value: std::str::from_utf8(&input[value_start..value_end])?.parse()?
+        })
     }
 }
 
@@ -57,15 +82,15 @@ impl SimpleError {
         result
     }
     fn parse(input: &Vec<u8>) -> Result<SimpleError, anyhow::Error> {
-        if starts_with_symbol_and_ends_with_r_n(b'-', input) {
-            Ok(SimpleError {
-                value: input[1..(input.len() - 2)].to_vec()
-            })
-        } else {
-            Err(RedisError {
-                message: format!("Invalid SimpleError '{}'", String::from_utf8_lossy(&input.clone()))
-            }.into())
-        }
+        let error_message = format!("Invalid SimpleError '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b'-', 0).context(error_message.clone())?;
+        let value_start = 1;
+        let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
+        read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
+        Ok(SimpleError {
+            value: input[value_start..value_end].to_vec()
+        })
     }
 }
 
@@ -83,15 +108,15 @@ impl SimpleString {
         result
     }
     fn parse(input: &Vec<u8>) -> Result<SimpleString, anyhow::Error> {
-        if starts_with_symbol_and_ends_with_r_n(b'+', input) {
-            Ok(SimpleString {
-                value: input[1..(input.len() - 2)].to_vec()
-            })
-        } else {
-            Err(RedisError {
-                message: format!("Invalid SimpleString '{}'", String::from_utf8_lossy(&input.clone()))
-            }.into())
-        }
+        let error_message = format!("Invalid SimpleString '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b'+', 0).context(error_message.clone())?;
+        let value_start = 1;
+        let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
+        read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
+        Ok(SimpleString {
+            value: input[value_start..value_end].to_vec()
+        })
     }
 }
 
@@ -158,16 +183,18 @@ mod tests {
     }
 
     #[test]
-    fn should_fail_parsing_if_more_bytes_are_provided() {
+    fn should_not_fail_parsing_if_more_bytes_are_provided() {
         let input = "+hello\r\n+world\r\n";
-        let error = SimpleString::parse(&input.as_bytes().to_vec()).unwrap_err();
-        assert_eq!(format!("{}", error), format!("RedisError: Invalid SimpleString '{}'", input))
+        let result = SimpleString::parse(&input.as_bytes().to_vec()).unwrap();
+        assert_eq!(result, SimpleString {
+            value: "hello".as_bytes().to_vec()
+        })
     }
 
     #[test]
     fn should_fail_parsing_invalid_simple_string() {
         let input = ":+5\r\n";
         let error = SimpleString::parse(&input.as_bytes().to_vec()).unwrap_err();
-        assert_eq!(format!("{}", error), format!("RedisError: Invalid SimpleString '{}'", input))
+        assert_eq!(format!("{}", error), format!("Invalid SimpleString '{}'", input))
     }
 }
