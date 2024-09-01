@@ -54,16 +54,16 @@ impl Integer {
         result.extend("\r\n".as_bytes());
         result
     }
-    fn parse(input: &Vec<u8>) -> Result<Integer, anyhow::Error> {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(Integer, usize), anyhow::Error> {
         let error_message = format!("Invalid Integer '{}'", String::from_utf8_lossy(&input.clone()));
-        read_and_assert_symbol(input, b':', 0).context(error_message.clone())?;
-        let value_start = 1;
+        read_and_assert_symbol(input, b':', position).context(error_message.clone())?;
+        let value_start = position + 1;
         let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
         read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
         read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-        Ok(Integer {
+        Ok((Integer {
             value: std::str::from_utf8(&input[value_start..value_end])?.parse()?
-        })
+        }, value_end + 2))
     }
 }
 
@@ -81,16 +81,16 @@ impl SimpleError {
         result.extend("\r\n".as_bytes());
         result
     }
-    fn parse(input: &Vec<u8>) -> Result<SimpleError, anyhow::Error> {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(SimpleError, usize), anyhow::Error> {
         let error_message = format!("Invalid SimpleError '{}'", String::from_utf8_lossy(&input.clone()));
-        read_and_assert_symbol(input, b'-', 0).context(error_message.clone())?;
-        let value_start = 1;
+        read_and_assert_symbol(input, b'-', position).context(error_message.clone())?;
+        let value_start = position + 1;
         let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
         read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
         read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-        Ok(SimpleError {
+        Ok((SimpleError {
             value: input[value_start..value_end].to_vec()
-        })
+        }, value_end + 2))
     }
 }
 
@@ -109,13 +109,14 @@ impl BulkString {
         result.extend("\r\n".as_bytes());
         result
     }
-    fn parse(input: &Vec<u8>) -> Result<BulkString, anyhow::Error> {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(BulkString, usize), anyhow::Error> {
         let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(&input.clone()));
-        read_and_assert_symbol(input, b'$', 0).context(error_message.clone())?;
-        let value_start = 1;
+        read_and_assert_symbol(input, b'$', position).context(error_message.clone())?;
+        let value_start = position + 1;
         let first_length_symbol = input.get(value_start);
 
         let mut value: Vec<u8> = Vec::new();
+        let mut new_position = position ;
         if first_length_symbol != Some(&b'-') {
             let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
             let string_length: usize = String::from_utf8_lossy(&input[value_start..length_end]).parse()?;
@@ -126,10 +127,13 @@ impl BulkString {
             read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
             read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
             value = input[value_start..value_end].to_vec();
+            new_position = value_end + 2;
+        } else {
+            new_position = new_position + "$-1\r\n".len();
         }
-        Ok(BulkString {
+        Ok((BulkString {
             value
-        })
+        }, new_position))
     }
 }
 
@@ -146,16 +150,16 @@ impl SimpleString {
         result.extend("\r\n".as_bytes());
         result
     }
-    fn parse(input: &Vec<u8>) -> Result<SimpleString, anyhow::Error> {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(SimpleString, usize), anyhow::Error> {
         let error_message = format!("Invalid SimpleString '{}'", String::from_utf8_lossy(&input.clone()));
-        read_and_assert_symbol(input, b'+', 0).context(error_message.clone())?;
-        let value_start = 1;
+        read_and_assert_symbol(input, b'+', position).context(error_message.clone())?;
+        let value_start = position + 1;
         let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
         read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
         read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-        Ok(SimpleString {
+        Ok((SimpleString {
             value: input[value_start..value_end].to_vec()
-        })
+        }, value_end + 2))
     }
 }
 
@@ -172,18 +176,18 @@ mod tests {
 
     #[test]
     fn should_parse_bulk_string() {
-        assert_eq!(BulkString::parse(&"$5\r\nHello\r\n".as_bytes().to_vec()).unwrap(), BulkString {
+        assert_eq!(BulkString::parse(&"$5\r\nHello\r\n".as_bytes().to_vec(), 0).unwrap(), (BulkString {
             value: "Hello".as_bytes().to_vec()
-        });
-        assert_eq!(BulkString::parse(&"$12\r\nHello\r\nworld\r\n".as_bytes().to_vec()).unwrap(), BulkString {
+        }, 11));
+        assert_eq!(BulkString::parse(&"$12\r\nHello\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap(), (BulkString {
             value: "Hello\r\nworld".as_bytes().to_vec()
-        });
-        assert_eq!(BulkString::parse(&"$-1\r\n".as_bytes().to_vec()).unwrap(), BulkString {
+        }, 19));
+        assert_eq!(BulkString::parse(&"$-1\r\n".as_bytes().to_vec(), 0).unwrap(), (BulkString {
             value: Vec::new()
-        });
-        assert_eq!(BulkString::parse(&"$0\r\n\r\n".as_bytes().to_vec()).unwrap(), BulkString {
+        }, 5));
+        assert_eq!(BulkString::parse(&"$0\r\n\r\n".as_bytes().to_vec(), 0).unwrap(), (BulkString {
             value: Vec::new()
-        });
+        }, 6));
     }
 
     #[test]
@@ -201,9 +205,9 @@ mod tests {
 
     #[test]
     fn should_parse_valid_integer() {
-        assert_eq!(Integer::parse(&":+5\r\n".as_bytes().to_vec()).unwrap().value, 5);
-        assert_eq!(Integer::parse(&":0\r\n".as_bytes().to_vec()).unwrap().value, 0);
-        assert_eq!(Integer::parse(&":-98\r\n".as_bytes().to_vec()).unwrap().value, -98);
+        assert_eq!(Integer::parse(&":+5\r\n".as_bytes().to_vec(), 0).unwrap().0.value, 5);
+        assert_eq!(Integer::parse(&":0\r\n".as_bytes().to_vec(), 0).unwrap().0.value, 0);
+        assert_eq!(Integer::parse(&":-98\r\n".as_bytes().to_vec(), 0).unwrap().0.value, -98);
     }
 
     #[test]
@@ -219,10 +223,10 @@ mod tests {
     #[test]
     fn should_parse_valid_simple_error() {
         let input = "-Error message\r\n".as_bytes().to_vec();
-        let result = SimpleError::parse(&input).unwrap();
-        assert_eq!(result, SimpleError {
+        let result = SimpleError::parse(&input, 0).unwrap();
+        assert_eq!(result, (SimpleError {
             value: "Error message".as_bytes().to_vec()
-        })
+        }, 16))
     }
 
     #[test]
@@ -238,25 +242,25 @@ mod tests {
     #[test]
     fn should_parse_valid_simple_string() {
         let input = "+hello\r\n".as_bytes().to_vec();
-        let result = SimpleString::parse(&input).unwrap();
-        assert_eq!(result, SimpleString {
+        let result = SimpleString::parse(&input, 0).unwrap();
+        assert_eq!(result, (SimpleString {
             value: "hello".as_bytes().to_vec()
-        })
+        }, 8))
     }
 
     #[test]
     fn should_not_fail_parsing_if_more_bytes_are_provided() {
         let input = "+hello\r\n+world\r\n";
-        let result = SimpleString::parse(&input.as_bytes().to_vec()).unwrap();
-        assert_eq!(result, SimpleString {
+        let result = SimpleString::parse(&input.as_bytes().to_vec(), 0).unwrap();
+        assert_eq!(result, (SimpleString {
             value: "hello".as_bytes().to_vec()
-        })
+        }, 8))
     }
 
     #[test]
     fn should_fail_parsing_invalid_simple_string() {
         let input = ":+5\r\n";
-        let error = SimpleString::parse(&input.as_bytes().to_vec()).unwrap_err();
+        let error = SimpleString::parse(&input.as_bytes().to_vec(), 0).unwrap_err();
         assert_eq!(format!("{}", error), format!("Invalid SimpleString '{}'", input))
     }
 }
