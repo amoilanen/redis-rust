@@ -95,6 +95,45 @@ impl SimpleError {
 }
 
 #[derive(Debug, PartialEq)]
+struct BulkString {
+    value: Vec<u8>
+}
+
+impl BulkString {
+    fn serialize(&self) -> Vec<u8> {
+        let mut result: Vec<u8> = Vec::new();
+        result.push(b'$');
+        result.extend(self.value.len().to_string().as_bytes());
+        result.extend("\r\n".as_bytes());
+        result.extend(self.value.as_slice());
+        result.extend("\r\n".as_bytes());
+        result
+    }
+    fn parse(input: &Vec<u8>) -> Result<BulkString, anyhow::Error> {
+        let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b'$', 0).context(error_message.clone())?;
+        let value_start = 1;
+        let first_length_symbol = input.get(value_start);
+
+        let mut value: Vec<u8> = Vec::new();
+        if first_length_symbol != Some(&b'-') {
+            let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
+            let string_length: usize = String::from_utf8_lossy(&input[value_start..length_end]).parse()?;
+            read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
+            read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
+            let value_start = length_end + 2;
+            let value_end = length_end + 2 + string_length;
+            read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
+            read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
+            value = input[value_start..value_end].to_vec();
+        }
+        Ok(BulkString {
+            value
+        })
+    }
+}
+
+#[derive(Debug, PartialEq)]
 struct SimpleString {
     value: Vec<u8>
 }
@@ -123,6 +162,29 @@ impl SimpleString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_serialize_bulk_string() {
+        assert_eq!(String::from_utf8_lossy(&BulkString {
+            value: "This is a bulk string\r\n One, two three".as_bytes().to_vec()
+        }.serialize()), "$38\r\nThis is a bulk string\r\n One, two three\r\n".to_string());
+    }
+
+    #[test]
+    fn should_parse_bulk_string() {
+        assert_eq!(BulkString::parse(&"$5\r\nHello\r\n".as_bytes().to_vec()).unwrap(), BulkString {
+            value: "Hello".as_bytes().to_vec()
+        });
+        assert_eq!(BulkString::parse(&"$12\r\nHello\r\nworld\r\n".as_bytes().to_vec()).unwrap(), BulkString {
+            value: "Hello\r\nworld".as_bytes().to_vec()
+        });
+        assert_eq!(BulkString::parse(&"$-1\r\n".as_bytes().to_vec()).unwrap(), BulkString {
+            value: Vec::new()
+        });
+        assert_eq!(BulkString::parse(&"$0\r\n\r\n".as_bytes().to_vec()).unwrap(), BulkString {
+            value: Vec::new()
+        });
+    }
 
     #[test]
     fn should_serialize_integer() {
