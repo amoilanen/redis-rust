@@ -2,9 +2,41 @@ use anyhow::Context;
 
 use crate::error::RedisError;
 
-#[derive(Debug, PartialEq)]
-struct Integer {
-    value: i64
+fn read_data_type(input: &Vec<u8>, position: usize) -> Result<(Box<dyn DataType>, usize), anyhow::Error> {
+    if let Some(prefix_symbol) = input.get(position) {
+        match prefix_symbol {
+            b'*' => {
+                let result = Array::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            },
+            b'+' => {
+                let result = SimpleString::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            },
+            b'$' => {
+                let result = BulkString::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            },
+            b'-' => {
+                let result = SimpleError::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            },
+            b':' => {
+                let result = Integer::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            }
+            ch =>
+                Err(RedisError { 
+                    message: format!("Could not read the next data type value '{}' at position {}, unsupported prefix {}",
+                        String::from_utf8_lossy(&input.clone()),
+                        position,
+                        ch
+                    )
+                }.into())
+        }
+    } else {
+        Err(RedisError { message: format!("Could not read the next data type value '{}' at position {}", String::from_utf8_lossy(&input.clone()), position) }.into())
+    }
 }
 
 fn read_and_assert_symbol(input: &Vec<u8>, symbol: u8, position: usize) -> Result<usize, anyhow::Error> {
@@ -43,7 +75,17 @@ fn read_until(input: &Vec<u8>, terminator: &Vec<u8>, position: usize) -> usize {
     }
 }
 
-impl Integer {
+//TODO: Convert into an enum?
+trait DataType: std::fmt::Debug + PartialEq {
+    fn serialize(&self) -> Vec<u8>;
+}
+
+#[derive(Debug, PartialEq)]
+struct Integer {
+    value: i64
+}
+
+impl DataType for Integer {
     fn serialize(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::new();
         result.push(b':');
@@ -54,6 +96,9 @@ impl Integer {
         result.extend("\r\n".as_bytes());
         result
     }
+}
+
+impl Integer {
     fn parse(input: &Vec<u8>, position: usize) -> Result<(Integer, usize), anyhow::Error> {
         let error_message = format!("Invalid Integer '{}'", String::from_utf8_lossy(&input.clone()));
         read_and_assert_symbol(input, b':', position).context(error_message.clone())?;
@@ -73,7 +118,7 @@ struct SimpleError {
     value: Vec<u8>
 }
 
-impl SimpleError {
+impl DataType for SimpleError {
     fn serialize(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::new();
         result.push(b'-');
@@ -81,6 +126,9 @@ impl SimpleError {
         result.extend("\r\n".as_bytes());
         result
     }
+}
+
+impl SimpleError {
     fn parse(input: &Vec<u8>, position: usize) -> Result<(SimpleError, usize), anyhow::Error> {
         let error_message = format!("Invalid SimpleError '{}'", String::from_utf8_lossy(&input.clone()));
         read_and_assert_symbol(input, b'-', position).context(error_message.clone())?;
@@ -99,7 +147,7 @@ struct BulkString {
     value: Vec<u8>
 }
 
-impl BulkString {
+impl DataType for BulkString {
     fn serialize(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::new();
         result.push(b'$');
@@ -109,17 +157,20 @@ impl BulkString {
         result.extend("\r\n".as_bytes());
         result
     }
+}
+
+impl BulkString {
     fn parse(input: &Vec<u8>, position: usize) -> Result<(BulkString, usize), anyhow::Error> {
         let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(&input.clone()));
         read_and_assert_symbol(input, b'$', position).context(error_message.clone())?;
-        let value_start = position + 1;
-        let first_length_symbol = input.get(value_start);
+        let length_start = position + 1;
+        let first_length_symbol = input.get(length_start);
 
         let mut value: Vec<u8> = Vec::new();
         let mut new_position = position ;
         if first_length_symbol != Some(&b'-') {
             let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
-            let string_length: usize = String::from_utf8_lossy(&input[value_start..length_end]).parse()?;
+            let string_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
             read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
             read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
             let value_start = length_end + 2;
@@ -142,7 +193,7 @@ struct SimpleString {
     value: Vec<u8>
 }
 
-impl SimpleString {
+impl DataType for SimpleString {
     fn serialize(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::new();
         result.push(b'+');
@@ -150,6 +201,9 @@ impl SimpleString {
         result.extend("\r\n".as_bytes());
         result
     }
+}
+
+impl SimpleString {
     fn parse(input: &Vec<u8>, position: usize) -> Result<(SimpleString, usize), anyhow::Error> {
         let error_message = format!("Invalid SimpleString '{}'", String::from_utf8_lossy(&input.clone()));
         read_and_assert_symbol(input, b'+', position).context(error_message.clone())?;
@@ -163,9 +217,80 @@ impl SimpleString {
     }
 }
 
+#[derive(PartialEq, Debug)]
+struct Array {
+    elements: Vec<Box<dyn DataType>>
+}
+
+impl DataType for Array {
+    fn serialize(&self) -> Vec<u8> {
+        let mut result: Vec<u8> = Vec::new();
+        result.push(b'*');
+        result.extend(self.elements.len().to_string().as_bytes());
+        result.extend("\r\n".as_bytes());
+        for element in self.elements.iter() {
+            result.extend(element.serialize());
+        }
+        result
+    }
+}
+
+impl Array {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(Array, usize), anyhow::Error> {
+        let error_message = format!("Invalid Array '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b'*', position).context(error_message.clone())?;
+        let length_start = 1;
+        let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
+        let array_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
+        read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
+        let mut elements: Vec<Box<dyn DataType>> = Vec::new();
+        let mut read_element_count = 0;
+        let mut current_position = length_end + 2;
+        while read_element_count < array_length {
+            let next_read_element = read_data_type(input, current_position)?;
+            elements.push(next_read_element.0);
+            current_position = next_read_element.1;
+            read_element_count = read_element_count + 1;
+        }
+        Ok((Array {
+            elements: elements
+        }, current_position))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_serialize_array() {
+        assert_eq!(String::from_utf8_lossy(&Array {
+            elements: vec![
+                Box::new(BulkString {
+                    value: "hello".as_bytes().to_vec()
+                }),
+                Box::new(BulkString {
+                    value: "world".as_bytes().to_vec()
+                })
+            ]
+        }.serialize()), "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".to_string());
+    }
+
+    #[test]
+    fn should_parse_array() {
+        assert_eq!(Array::parse(&"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap(),
+            (Array {
+                elements: vec![
+                    Box::new(BulkString {
+                        value: "hello".as_bytes().to_vec()
+                    }),
+                    Box::new(BulkString {
+                        value: "world".as_bytes().to_vec()
+                    })
+                ]
+            }, 26));
+    }
 
     #[test]
     fn should_serialize_bulk_string() {
