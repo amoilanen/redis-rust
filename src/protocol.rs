@@ -75,8 +75,7 @@ fn read_until(input: &Vec<u8>, terminator: &Vec<u8>, position: usize) -> usize {
     }
 }
 
-//TODO: Convert into an enum?
-trait DataType: std::fmt::Debug + PartialEq {
+trait DataType: std::fmt::Debug {
     fn serialize(&self) -> Vec<u8>;
 }
 
@@ -169,7 +168,7 @@ impl BulkString {
         let mut value: Vec<u8> = Vec::new();
         let mut new_position = position ;
         if first_length_symbol != Some(&b'-') {
-            let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
+            let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
             let string_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
             read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
             read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
@@ -217,7 +216,7 @@ impl SimpleString {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 struct Array {
     elements: Vec<Box<dyn DataType>>
 }
@@ -279,17 +278,11 @@ mod tests {
 
     #[test]
     fn should_parse_array() {
-        assert_eq!(Array::parse(&"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap(),
-            (Array {
-                elements: vec![
-                    Box::new(BulkString {
-                        value: "hello".as_bytes().to_vec()
-                    }),
-                    Box::new(BulkString {
-                        value: "world".as_bytes().to_vec()
-                    })
-                ]
-            }, 26));
+        let parsed = Array::parse(&"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap();
+        assert_eq!(parsed.0.elements.len(), 2);
+        assert_eq!(parsed.1, 26);
+        assert_eq!(String::from_utf8(parsed.0.elements[0].serialize()).unwrap(), "$5\r\nhello\r\n".to_string());
+        assert_eq!(String::from_utf8(parsed.0.elements[1].serialize()).unwrap(), "$5\r\nworld\r\n".to_string());
     }
 
     #[test]
