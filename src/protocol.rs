@@ -24,7 +24,11 @@ fn read_data_type(input: &Vec<u8>, position: usize) -> Result<(Box<dyn DataType>
             b':' => {
                 let result = Integer::parse(input, position)?;
                 Ok((Box::new(result.0), result.1))
-            }
+            },
+            b'_' => {
+                let result = Null::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            },
             ch =>
                 Err(RedisError { 
                     message: format!("Could not read the next data type value '{}' at position {}, unsupported prefix {}",
@@ -240,7 +244,7 @@ impl Array {
         read_and_assert_symbol(input, b'*', position).context(error_message.clone())?;
         let length_start = 1;
         let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
-        let array_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
+        let array_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
         read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
         read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
         let mut elements: Vec<Box<dyn DataType>> = Vec::new();
@@ -258,9 +262,38 @@ impl Array {
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct Null {}
+
+impl DataType for Null {
+    fn serialize(&self) -> Vec<u8> {
+        "_\r\n".as_bytes().to_vec()
+    }
+}
+
+impl Null {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(Null, usize), anyhow::Error> {
+        let error_message = format!("Invalid Null '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b'_', position).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\r', position + 1).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', position + 2).context(error_message.clone())?;
+        Ok((Null {}, position + 3))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_serialize_null() {
+        assert_eq!(String::from_utf8_lossy(&Null {}.serialize()), "_\r\n".to_string());
+    }
+
+    #[test]
+    fn should_parse_null() {
+        assert_eq!(Null::parse(&"_\r\n".as_bytes().to_vec(), 0).unwrap().0, Null {});
+    }
 
     #[test]
     fn should_serialize_array() {
@@ -278,11 +311,15 @@ mod tests {
 
     #[test]
     fn should_parse_array() {
-        let parsed = Array::parse(&"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap();
+        let mut parsed = Array::parse(&"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap();
         assert_eq!(parsed.0.elements.len(), 2);
         assert_eq!(parsed.1, 26);
         assert_eq!(String::from_utf8(parsed.0.elements[0].serialize()).unwrap(), "$5\r\nhello\r\n".to_string());
         assert_eq!(String::from_utf8(parsed.0.elements[1].serialize()).unwrap(), "$5\r\nworld\r\n".to_string());
+
+        parsed = Array::parse(&"*-1\r\n".as_bytes().to_vec(), 0).unwrap();
+        assert_eq!(parsed.0.elements.len(), 0);
+        assert_eq!(parsed.1, 5);
     }
 
     #[test]
