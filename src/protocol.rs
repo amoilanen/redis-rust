@@ -92,9 +92,6 @@ impl DataType for Integer {
     fn serialize(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::new();
         result.push(b':');
-        if self.value > 0 {
-            result.push(b'+')
-        }
         result.extend(self.value.to_string().as_bytes());
         result.extend("\r\n".as_bytes());
         result
@@ -106,7 +103,7 @@ impl Integer {
         let error_message = format!("Invalid Integer '{}'", String::from_utf8_lossy(&input.clone()));
         read_and_assert_symbol(input, b':', position).context(error_message.clone())?;
         let value_start = position + 1;
-        let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
+        let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), value_start);
         read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
         read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
         Ok((Integer {
@@ -136,7 +133,7 @@ impl SimpleError {
         let error_message = format!("Invalid SimpleError '{}'", String::from_utf8_lossy(&input.clone()));
         read_and_assert_symbol(input, b'-', position).context(error_message.clone())?;
         let value_start = position + 1;
-        let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
+        let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), value_start);
         read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
         read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
         Ok((SimpleError {
@@ -211,12 +208,56 @@ impl SimpleString {
         let error_message = format!("Invalid SimpleString '{}'", String::from_utf8_lossy(&input.clone()));
         read_and_assert_symbol(input, b'+', position).context(error_message.clone())?;
         let value_start = position + 1;
-        let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
+        let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), value_start);
         read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
         read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
         Ok((SimpleString {
             value: input[value_start..value_end].to_vec()
         }, value_end + 2))
+    }
+}
+
+#[derive(Debug)]
+struct Map {
+    entries: Vec<(Box<dyn DataType>, Box<dyn DataType>)>
+}
+
+impl DataType for Map {
+    fn serialize(&self) -> Vec<u8> {
+        let mut result: Vec<u8> = Vec::new();
+        result.push(b'%');
+        result.extend(self.entries.len().to_string().as_bytes());
+        result.extend("\r\n".as_bytes());
+        for element in self.entries.iter() {
+            result.extend(element.0.serialize());
+            result.extend(element.1.serialize());
+        }
+        result
+    }
+}
+
+impl Map {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(Map, usize), anyhow::Error> {
+        let error_message = format!("Invalid Map '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b'%', position).context(error_message.clone())?;
+        let length_start = position + 1;
+        let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
+        let map_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
+        read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
+        let mut entries: Vec<(Box<dyn DataType>, Box<dyn DataType>)> = Vec::new();
+        let mut read_entry_count = 0;
+        let mut current_position = length_end + 2;
+        while read_entry_count < map_length {
+            let next_read_key = read_data_type(input, current_position)?;
+            let next_read_value = read_data_type(input, next_read_key.1)?;
+            entries.push((next_read_key.0, next_read_value.0));
+            current_position = next_read_value.1;
+            read_entry_count = read_entry_count + 1;
+        }
+        Ok((Map {
+            entries
+        }, current_position))
     }
 }
 
@@ -242,8 +283,8 @@ impl Array {
     fn parse(input: &Vec<u8>, position: usize) -> Result<(Array, usize), anyhow::Error> {
         let error_message = format!("Invalid Array '{}'", String::from_utf8_lossy(&input.clone()));
         read_and_assert_symbol(input, b'*', position).context(error_message.clone())?;
-        let length_start = 1;
-        let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), 1);
+        let length_start = position + 1;
+        let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
         let array_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
         read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
         read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
@@ -293,6 +334,41 @@ mod tests {
     #[test]
     fn should_parse_null() {
         assert_eq!(Null::parse(&"_\r\n".as_bytes().to_vec(), 0).unwrap().0, Null {});
+    }
+
+    #[test]
+    fn should_serialize_map() {
+        assert_eq!(String::from_utf8_lossy(&Map {
+            entries: vec![
+                (
+                    Box::new(Integer {
+                        value: 1
+                    }),
+                    Box::new(BulkString {
+                        value: "hello".as_bytes().to_vec()
+                    })
+                ),
+                (
+                    Box::new(Integer {
+                        value: 2
+                    }),
+                    Box::new(BulkString {
+                        value: "world".as_bytes().to_vec()
+                    })
+                )
+            ]
+        }.serialize()), "%2\r\n:1\r\n$5\r\nhello\r\n:2\r\n$5\r\nworld\r\n".to_string());
+    }
+
+    #[test]
+    fn should_parse_map() {
+        let parsed = Map::parse(&"%2\r\n:1\r\n$5\r\nhello\r\n:2\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap();
+        assert_eq!(parsed.0.entries.len(), 2);
+        assert_eq!(parsed.1, 34);
+        assert_eq!(String::from_utf8(parsed.0.entries[0].0.serialize()).unwrap(), ":1\r\n".to_string());
+        assert_eq!(String::from_utf8(parsed.0.entries[0].1.serialize()).unwrap(), "$5\r\nhello\r\n".to_string());
+        assert_eq!(String::from_utf8(parsed.0.entries[1].0.serialize()).unwrap(), ":2\r\n".to_string());
+        assert_eq!(String::from_utf8(parsed.0.entries[1].1.serialize()).unwrap(), "$5\r\nworld\r\n".to_string());
     }
 
     #[test]
@@ -352,7 +428,7 @@ mod tests {
         }.serialize()), ":0\r\n".to_string());
         assert_eq!(String::from_utf8_lossy(&Integer {
             value: 101
-        }.serialize()), ":+101\r\n".to_string());
+        }.serialize()), ":101\r\n".to_string());
         assert_eq!(String::from_utf8_lossy(&Integer {
             value: -15
         }.serialize()), ":-15\r\n".to_string());
