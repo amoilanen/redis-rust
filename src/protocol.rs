@@ -29,6 +29,14 @@ fn read_data_type(input: &Vec<u8>, position: usize) -> Result<(Box<dyn DataType>
                 let result = Null::parse(input, position)?;
                 Ok((Box::new(result.0), result.1))
             },
+            b'%' => {
+                let result = Map::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            },
+            b'#' => {
+                let result = Map::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            },
             ch =>
                 Err(RedisError { 
                     message: format!("Could not read the next data type value '{}' at position {}, unsupported prefix {}",
@@ -322,9 +330,52 @@ impl Null {
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct Boolean {
+    value: bool
+}
+
+impl DataType for Boolean {
+    fn serialize(&self) -> Vec<u8> {
+        let mut result: Vec<u8> = Vec::new();
+        result.push(b'#');
+        if self.value {
+            result.push(b't');
+        } else {
+            result.push(b'f');
+        }
+        result.extend("\r\n".as_bytes());
+        result
+    }
+}
+
+impl Boolean {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(Boolean, usize), anyhow::Error> {
+        let error_message = format!("Invalid Null '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b'#', position).context(error_message.clone())?;
+        let &value_input = input.get(position + 1).ok_or::<anyhow::Error>(RedisError { message: error_message.clone() }.into())?;
+        let value = value_input == b't';
+        read_and_assert_symbol(input, b'\r', position + 2).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', position + 3).context(error_message.clone())?;
+        Ok((Boolean { value }, position + 4))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_serialize_boolean() {
+        assert_eq!(String::from_utf8_lossy(&Boolean { value: true }.serialize()), "#t\r\n".to_string());
+        assert_eq!(String::from_utf8_lossy(&Boolean { value: false }.serialize()), "#f\r\n".to_string());
+    }
+
+    #[test]
+    fn should_parse_boolean() {
+        assert_eq!(Boolean::parse(&"#t\r\n".as_bytes().to_vec(), 0).unwrap().0, Boolean { value: true });
+        assert_eq!(Boolean::parse(&"#f\r\n".as_bytes().to_vec(), 0).unwrap().0, Boolean { value: false });
+    }
 
     #[test]
     fn should_serialize_null() {
