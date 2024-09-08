@@ -92,6 +92,36 @@ trait DataType: std::fmt::Debug {
 }
 
 #[derive(Debug, PartialEq)]
+struct Double {
+    value: f64
+}
+
+impl DataType for Double {
+    fn serialize(&self) -> Vec<u8> {
+        let mut result: Vec<u8> = Vec::new();
+        result.push(b',');
+        result.extend(self.value.to_string().as_bytes());
+        result.extend("\r\n".as_bytes());
+        result
+    }
+}
+
+impl Double {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(Double, usize), anyhow::Error> {
+        let error_message = format!("Invalid Double '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b',', position).context(error_message.clone())?;
+        let value_start = position + 1;
+        let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), value_start);
+        read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
+        let value: f64 = String::from_utf8(input[value_start..value_end].to_vec())?.parse()?;
+        Ok((Double {
+            value
+        }, value_end + 2))
+    }
+}
+
+#[derive(Debug, PartialEq)]
 struct Integer {
     value: i64
 }
@@ -363,7 +393,23 @@ impl Boolean {
 
 #[cfg(test)]
 mod tests {
+    use core::f64;
+
     use super::*;
+
+    #[test]
+    fn should_serialize_double() {
+        assert_eq!(String::from_utf8_lossy(&Double { value: 1.23 }.serialize()), ",1.23\r\n".to_string());
+    }
+
+    #[test]
+    fn should_parse_double() {
+        assert_eq!(Double::parse(&",10\r\n".as_bytes().to_vec(), 0).unwrap().0, Double { value: 10.0 });
+        assert_eq!(Double::parse(&",1.23\r\n".as_bytes().to_vec(), 0).unwrap().0, Double { value: 1.23 });
+        assert_eq!(Double::parse(&",inf\r\n".as_bytes().to_vec(), 0).unwrap().0, Double { value: f64::INFINITY });
+        assert_eq!(Double::parse(&",-inf\r\n".as_bytes().to_vec(), 0).unwrap().0, Double { value: f64::NEG_INFINITY });
+        assert!(Double::parse(&",nan\r\n".as_bytes().to_vec(), 0).unwrap().0.value.is_nan());
+    }
 
     #[test]
     fn should_serialize_boolean() {
