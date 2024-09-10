@@ -34,7 +34,15 @@ fn read_data_type(input: &Vec<u8>, position: usize) -> Result<(Box<dyn DataType>
                 Ok((Box::new(result.0), result.1))
             },
             b'#' => {
-                let result = Map::parse(input, position)?;
+                let result = Boolean::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            },
+            b'(' => {
+                let result = BigNumber::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            },
+            b'!' => {
+                let result = BulkError::parse(input, position)?;
                 Ok((Box::new(result.0), result.1))
             },
             ch =>
@@ -117,6 +125,48 @@ impl Double {
         let value: f64 = String::from_utf8(input[value_start..value_end].to_vec())?.parse()?;
         Ok((Double {
             value
+        }, value_end + 2))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct BigNumber {
+    sign: u8,
+    value: Vec<u8> // more efficient representation is possible
+}
+
+impl DataType for BigNumber {
+    fn serialize(&self) -> Vec<u8> {
+        let mut result: Vec<u8> = Vec::new();
+        result.push(b'(');
+        if self.sign == b'-' {
+            result.push(self.sign)
+        }
+        result.extend(&self.value);
+        result.extend("\r\n".as_bytes());
+        result
+    }
+}
+
+impl BigNumber {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(BigNumber, usize), anyhow::Error> {
+        let error_message = format!("Invalid BigNumber '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b'(', position).context(error_message.clone())?;
+        let mut value_start = position + 1;
+        let &maybeSign = input.get(position + 1).ok_or::<anyhow::Error>(RedisError {
+            message: error_message.clone()
+        }.into())?;
+        let mut sign: Option<u8> = None;
+        if maybeSign == b'+' || maybeSign == b'-' {
+            value_start = position + 2;
+            sign = Some(maybeSign);
+        }
+        let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), value_start);
+        read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
+        Ok((BigNumber {
+            sign: sign.unwrap_or(b'+'),
+            value: input[value_start..value_end].to_vec()
         }, value_end + 2))
     }
 }
@@ -223,6 +273,86 @@ impl BulkString {
         Ok((BulkString {
             value
         }, new_position))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct BulkError {
+    value: Vec<u8>
+}
+
+impl DataType for BulkError {
+    fn serialize(&self) -> Vec<u8> {
+        let mut result: Vec<u8> = Vec::new();
+        result.push(b'!');
+        result.extend(self.value.len().to_string().as_bytes());
+        result.extend("\r\n".as_bytes());
+        result.extend(self.value.as_slice());
+        result.extend("\r\n".as_bytes());
+        result
+    }
+}
+
+impl BulkError {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(BulkError, usize), anyhow::Error> {
+        let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b'!', position).context(error_message.clone())?;
+        let length_start = position + 1;
+        let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
+        let content_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
+        read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
+        let value_start = length_end + 2;
+        let value_end = length_end + 2 + content_length;
+        read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
+        Ok((BulkError {
+            value: input[value_start..value_end].to_vec()
+        }, value_end + 2))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct VerbatimString {
+    encoding: Vec<u8>,
+    value: Vec<u8>
+}
+
+impl DataType for VerbatimString {
+    fn serialize(&self) -> Vec<u8> {
+        let mut result: Vec<u8> = Vec::new();
+        result.push(b'=');
+        result.extend((self.value.len() + self.encoding.len() + 1).to_string().as_bytes());
+        result.extend("\r\n".as_bytes());
+        result.extend(self.encoding.as_slice());
+        result.push(b':');
+        result.extend(self.value.as_slice());
+        result.extend("\r\n".as_bytes());
+        result
+    }
+}
+
+impl VerbatimString {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(VerbatimString, usize), anyhow::Error> {
+        let error_message = format!("Invalid VerbatimString '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b'=', position).context(error_message.clone())?;
+        let length_start = position + 1;
+        let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
+        let content_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
+        read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
+        let value_start = length_end + 2;
+        let value_end = length_end + 2 + content_length;
+        read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
+        let encoding_and_content = input[value_start..value_end].to_vec();
+        let index_before_content = encoding_and_content.iter().position(|&ch| ch == b':').ok_or(RedisError {
+            message: error_message.clone()
+        })?;
+        Ok((VerbatimString {
+            encoding: input[value_start..(value_start + index_before_content)].to_vec(),
+            value: input[(value_start + index_before_content + 1)..value_end].to_vec()
+        }, value_end + 2))
     }
 }
 
@@ -396,6 +526,49 @@ mod tests {
     use core::f64;
 
     use super::*;
+
+    #[test]
+    fn should_serialize_verbatim_string() {
+        assert_eq!(String::from_utf8_lossy(&VerbatimString {
+            encoding: "txt".as_bytes().to_vec(),
+            value: "Some string".as_bytes().to_vec()
+        }.serialize()), "=15\r\ntxt:Some string\r\n".to_string());
+    }
+
+    #[test]
+    fn should_parse_verbatim_string() {
+        assert_eq!(VerbatimString::parse(&"=15\r\ntxt:Some string\r\n".as_bytes().to_vec(), 0).unwrap(), (VerbatimString {
+            encoding: "txt".as_bytes().to_vec(),
+            value: "Some string".as_bytes().to_vec()
+        }, 22));
+    }
+
+    #[test]
+    fn should_serialize_bulk_error() {
+        assert_eq!(String::from_utf8_lossy(&BulkError {
+            value: "Some error".as_bytes().to_vec()
+        }.serialize()), "!10\r\nSome error\r\n".to_string());
+    }
+
+    #[test]
+    fn should_parse_bulk_error() {
+        assert_eq!(BulkError::parse(&"!21\r\nSYNTAX invalid syntax\r\n".as_bytes().to_vec(), 0).unwrap(), (BulkError {
+            value: "SYNTAX invalid syntax".as_bytes().to_vec()
+        }, 28));
+    }
+
+    #[test]
+    fn should_serialize_big_number() {
+        assert_eq!(String::from_utf8_lossy(&BigNumber { sign: b'+', value: "349".as_bytes().to_vec() }.serialize()), "(349\r\n".to_string());
+        assert_eq!(String::from_utf8_lossy(&BigNumber { sign: b'-', value: "349".as_bytes().to_vec() }.serialize()), "(-349\r\n".to_string());
+    }
+
+    #[test]
+    fn should_parse_big_number() {
+        assert_eq!(BigNumber::parse(&"(349\r\n".as_bytes().to_vec(), 0).unwrap().0, BigNumber { sign: b'+', value: "349".as_bytes().to_vec() });
+        assert_eq!(BigNumber::parse(&"(+349\r\n".as_bytes().to_vec(), 0).unwrap().0, BigNumber { sign: b'+', value: "349".as_bytes().to_vec() });
+        assert_eq!(BigNumber::parse(&"(-123\r\n".as_bytes().to_vec(), 0).unwrap().0, BigNumber { sign: b'-', value: "123".as_bytes().to_vec() });
+    }
 
     #[test]
     fn should_serialize_double() {
