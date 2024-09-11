@@ -1,4 +1,5 @@
 use anyhow::Context;
+use std::collections::HashSet;
 
 use crate::error::RedisError;
 
@@ -43,6 +44,10 @@ fn read_data_type(input: &Vec<u8>, position: usize) -> Result<(Box<dyn DataType>
             },
             b'!' => {
                 let result = BulkError::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            },
+            b'~' => {
+                let result = Set::parse(input, position)?;
                 Ok((Box::new(result.0), result.1))
             },
             ch =>
@@ -430,6 +435,48 @@ impl Map {
 }
 
 #[derive(Debug)]
+struct Set {
+    elements: Vec<Box<dyn DataType>>
+}
+
+impl DataType for Set {
+    fn serialize(&self) -> Vec<u8> {
+        let mut result: Vec<u8> = Vec::new();
+        result.push(b'~');
+        result.extend(self.elements.len().to_string().as_bytes());
+        result.extend("\r\n".as_bytes());
+        for element in self.elements.iter() {
+            result.extend(element.serialize());
+        }
+        result
+    }
+}
+
+impl Set {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(Set, usize), anyhow::Error> {
+        let error_message = format!("Invalid Set '{}'", String::from_utf8_lossy(&input.clone()));
+        read_and_assert_symbol(input, b'~', position).context(error_message.clone())?;
+        let length_start = position + 1;
+        let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
+        let map_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
+        read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
+        read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
+        let mut elements: Vec<Box<dyn DataType>> = Vec::new();
+        let mut read_element_count = 0;
+        let mut current_position = length_end + 2;
+        while read_element_count < map_length {
+            let next_element = read_data_type(input, current_position)?;
+            elements.push(next_element.0);
+            read_element_count = read_element_count + 1;
+            current_position = next_element.1;
+        }
+        Ok((Set {
+            elements
+        }, current_position))
+    }
+}
+
+#[derive(Debug)]
 struct Array {
     elements: Vec<Box<dyn DataType>>
 }
@@ -526,6 +573,29 @@ mod tests {
     use core::f64;
 
     use super::*;
+
+    #[test]
+    fn should_serialize_set() {
+        assert_eq!(String::from_utf8_lossy(&Set {
+            elements: vec![
+                Box::new(Integer {
+                    value: 1
+                }),
+                Box::new(BulkString {
+                    value: "hello".as_bytes().to_vec()
+                })
+            ]
+        }.serialize()), "~2\r\n:1\r\n$5\r\nhello\r\n".to_string());
+    }
+
+    #[test]
+    fn should_parse_set() {
+        let parsed = Set::parse(&"~2\r\n:1\r\n$5\r\nhello\r\n".as_bytes().to_vec(), 0).unwrap();
+        assert_eq!(parsed.0.elements.len(), 2);
+        assert_eq!(parsed.1, 19);
+        assert_eq!(String::from_utf8(parsed.0.elements[0].serialize()).unwrap(), ":1\r\n".to_string());
+        assert_eq!(String::from_utf8(parsed.0.elements[1].serialize()).unwrap(), "$5\r\nhello\r\n".to_string());
+    }
 
     #[test]
     fn should_serialize_verbatim_string() {
