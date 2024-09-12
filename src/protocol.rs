@@ -476,6 +476,37 @@ impl Set {
     }
 }
 
+fn serialize_array_like(elements: &Vec<Box<dyn DataType>>, prefix: u8) -> Vec<u8> {
+    let mut result: Vec<u8> = Vec::new();
+    result.push(prefix);
+    result.extend(elements.len().to_string().as_bytes());
+    result.extend("\r\n".as_bytes());
+    for element in elements.iter() {
+        result.extend(element.serialize());
+    }
+    result
+}
+
+fn parse_array_like(input: &Vec<u8>, position: usize, prefix: u8) -> Result<(Vec<Box<dyn DataType>>, usize), anyhow::Error> {
+    let error_message = format!("Invalid Array-like '{}'", String::from_utf8_lossy(&input.clone()));
+    read_and_assert_symbol(input, prefix, position).context(error_message.clone())?;
+    let length_start = position + 1;
+    let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
+    let array_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
+    read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
+    read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
+    let mut elements: Vec<Box<dyn DataType>> = Vec::new();
+    let mut read_element_count = 0;
+    let mut current_position = length_end + 2;
+    while read_element_count < array_length {
+        let next_read_element = read_data_type(input, current_position)?;
+        elements.push(next_read_element.0);
+        current_position = next_read_element.1;
+        read_element_count = read_element_count + 1;
+    }
+    Ok((elements, current_position))
+}
+
 #[derive(Debug)]
 struct Array {
     elements: Vec<Box<dyn DataType>>
@@ -483,38 +514,36 @@ struct Array {
 
 impl DataType for Array {
     fn serialize(&self) -> Vec<u8> {
-        let mut result: Vec<u8> = Vec::new();
-        result.push(b'*');
-        result.extend(self.elements.len().to_string().as_bytes());
-        result.extend("\r\n".as_bytes());
-        for element in self.elements.iter() {
-            result.extend(element.serialize());
-        }
-        result
+        serialize_array_like(&self.elements, b'*')
     }
 }
 
 impl Array {
     fn parse(input: &Vec<u8>, position: usize) -> Result<(Array, usize), anyhow::Error> {
-        let error_message = format!("Invalid Array '{}'", String::from_utf8_lossy(&input.clone()));
-        read_and_assert_symbol(input, b'*', position).context(error_message.clone())?;
-        let length_start = position + 1;
-        let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
-        let array_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
-        read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
-        read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
-        let mut elements: Vec<Box<dyn DataType>> = Vec::new();
-        let mut read_element_count = 0;
-        let mut current_position = length_end + 2;
-        while read_element_count < array_length {
-            let next_read_element = read_data_type(input, current_position)?;
-            elements.push(next_read_element.0);
-            current_position = next_read_element.1;
-            read_element_count = read_element_count + 1;
-        }
+        let (elements, updated_position) = parse_array_like(input, position, b'*')?;
         Ok((Array {
-            elements: elements
-        }, current_position))
+            elements
+        }, updated_position))
+    }
+}
+
+#[derive(Debug)]
+struct Push {
+    elements: Vec<Box<dyn DataType>>
+}
+
+impl DataType for Push {
+    fn serialize(&self) -> Vec<u8> {
+        serialize_array_like(&self.elements, b'>')
+    }
+}
+
+impl Push {
+    fn parse(input: &Vec<u8>, position: usize) -> Result<(Array, usize), anyhow::Error> {
+        let (elements, updated_position) = parse_array_like(input, position, b'>')?;
+        Ok((Array {
+            elements
+        }, updated_position))
     }
 }
 
@@ -571,7 +600,6 @@ impl Boolean {
 #[cfg(test)]
 mod tests {
     use core::f64;
-
     use super::*;
 
     #[test]
@@ -736,6 +764,29 @@ mod tests {
         parsed = Array::parse(&"*-1\r\n".as_bytes().to_vec(), 0).unwrap();
         assert_eq!(parsed.0.elements.len(), 0);
         assert_eq!(parsed.1, 5);
+    }
+
+    #[test]
+    fn should_serialize_push() {
+        assert_eq!(String::from_utf8_lossy(&Push {
+            elements: vec![
+                Box::new(BulkString {
+                    value: "hello".as_bytes().to_vec()
+                }),
+                Box::new(BulkString {
+                    value: "world".as_bytes().to_vec()
+                })
+            ]
+        }.serialize()), ">2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".to_string());
+    }
+
+    #[test]
+    fn should_parse_push() {
+        let parsed = Push::parse(&">2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap();
+        assert_eq!(parsed.0.elements.len(), 2);
+        assert_eq!(parsed.1, 26);
+        assert_eq!(String::from_utf8(parsed.0.elements[0].serialize()).unwrap(), "$5\r\nhello\r\n".to_string());
+        assert_eq!(String::from_utf8(parsed.0.elements[1].serialize()).unwrap(), "$5\r\nworld\r\n".to_string());
     }
 
     #[test]
