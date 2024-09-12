@@ -1,9 +1,8 @@
 use anyhow::Context;
-use std::collections::HashSet;
 
 use crate::error::RedisError;
 
-fn read_data_type(input: &Vec<u8>, position: usize) -> Result<(Box<dyn DataType>, usize), anyhow::Error> {
+pub(crate) fn parse_data_type(input: &Vec<u8>, position: usize) -> Result<(Box<dyn DataType>, usize), anyhow::Error> {
     if let Some(prefix_symbol) = input.get(position) {
         match prefix_symbol {
             b'*' => {
@@ -48,6 +47,10 @@ fn read_data_type(input: &Vec<u8>, position: usize) -> Result<(Box<dyn DataType>
             },
             b'~' => {
                 let result = Set::parse(input, position)?;
+                Ok((Box::new(result.0), result.1))
+            },
+            b'>' => {
+                let result = Push::parse(input, position)?;
                 Ok((Box::new(result.0), result.1))
             },
             ch =>
@@ -100,12 +103,12 @@ fn read_until(input: &Vec<u8>, terminator: &Vec<u8>, position: usize) -> usize {
     }
 }
 
-trait DataType: std::fmt::Debug {
+pub(crate) trait DataType: std::fmt::Debug {
     fn serialize(&self) -> Vec<u8>;
 }
 
 #[derive(Debug, PartialEq)]
-struct Double {
+pub(crate) struct Double {
     value: f64
 }
 
@@ -135,7 +138,7 @@ impl Double {
 }
 
 #[derive(Debug, PartialEq)]
-struct BigNumber {
+pub(crate) struct BigNumber {
     sign: u8,
     value: Vec<u8> // more efficient representation is possible
 }
@@ -177,7 +180,7 @@ impl BigNumber {
 }
 
 #[derive(Debug, PartialEq)]
-struct Integer {
+pub(crate) struct Integer {
     value: i64
 }
 
@@ -207,7 +210,7 @@ impl Integer {
 
 
 #[derive(Debug, PartialEq)]
-struct SimpleError {
+pub(crate) struct SimpleError {
     value: Vec<u8>
 }
 
@@ -236,7 +239,7 @@ impl SimpleError {
 }
 
 #[derive(Debug, PartialEq)]
-struct BulkString {
+pub(crate) struct BulkString {
     value: Vec<u8>
 }
 
@@ -282,7 +285,7 @@ impl BulkString {
 }
 
 #[derive(Debug, PartialEq)]
-struct BulkError {
+pub(crate) struct BulkError {
     value: Vec<u8>
 }
 
@@ -318,7 +321,7 @@ impl BulkError {
 }
 
 #[derive(Debug, PartialEq)]
-struct VerbatimString {
+pub(crate) struct VerbatimString {
     encoding: Vec<u8>,
     value: Vec<u8>
 }
@@ -362,8 +365,8 @@ impl VerbatimString {
 }
 
 #[derive(Debug, PartialEq)]
-struct SimpleString {
-    value: Vec<u8>
+pub(crate) struct SimpleString {
+    pub(crate) value: Vec<u8>
 }
 
 impl DataType for SimpleString {
@@ -391,7 +394,7 @@ impl SimpleString {
 }
 
 #[derive(Debug)]
-struct Map {
+pub(crate) struct Map {
     entries: Vec<(Box<dyn DataType>, Box<dyn DataType>)>
 }
 
@@ -422,8 +425,8 @@ impl Map {
         let mut read_entry_count = 0;
         let mut current_position = length_end + 2;
         while read_entry_count < map_length {
-            let next_read_key = read_data_type(input, current_position)?;
-            let next_read_value = read_data_type(input, next_read_key.1)?;
+            let next_read_key = parse_data_type(input, current_position)?;
+            let next_read_value = parse_data_type(input, next_read_key.1)?;
             entries.push((next_read_key.0, next_read_value.0));
             current_position = next_read_value.1;
             read_entry_count = read_entry_count + 1;
@@ -435,7 +438,7 @@ impl Map {
 }
 
 #[derive(Debug)]
-struct Set {
+pub(crate) struct Set {
     elements: Vec<Box<dyn DataType>>
 }
 
@@ -465,7 +468,7 @@ impl Set {
         let mut read_element_count = 0;
         let mut current_position = length_end + 2;
         while read_element_count < map_length {
-            let next_element = read_data_type(input, current_position)?;
+            let next_element = parse_data_type(input, current_position)?;
             elements.push(next_element.0);
             read_element_count = read_element_count + 1;
             current_position = next_element.1;
@@ -499,7 +502,7 @@ fn parse_array_like(input: &Vec<u8>, position: usize, prefix: u8) -> Result<(Vec
     let mut read_element_count = 0;
     let mut current_position = length_end + 2;
     while read_element_count < array_length {
-        let next_read_element = read_data_type(input, current_position)?;
+        let next_read_element = parse_data_type(input, current_position)?;
         elements.push(next_read_element.0);
         current_position = next_read_element.1;
         read_element_count = read_element_count + 1;
@@ -508,7 +511,7 @@ fn parse_array_like(input: &Vec<u8>, position: usize, prefix: u8) -> Result<(Vec
 }
 
 #[derive(Debug)]
-struct Array {
+pub(crate) struct Array {
     elements: Vec<Box<dyn DataType>>
 }
 
@@ -528,7 +531,7 @@ impl Array {
 }
 
 #[derive(Debug)]
-struct Push {
+pub(crate) struct Push {
     elements: Vec<Box<dyn DataType>>
 }
 
@@ -548,7 +551,7 @@ impl Push {
 }
 
 #[derive(Debug, PartialEq)]
-struct Null {}
+pub(crate) struct Null {}
 
 impl DataType for Null {
     fn serialize(&self) -> Vec<u8> {
@@ -567,7 +570,7 @@ impl Null {
 }
 
 #[derive(Debug, PartialEq)]
-struct Boolean {
+pub(crate) struct Boolean {
     value: bool
 }
 
