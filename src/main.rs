@@ -16,12 +16,18 @@ pub(crate) fn read_message(stream: &mut TcpStream) -> Result<Option<Box<dyn Data
     message_bytes.extend(&buffer[0..read_bytes]);
 
     while read_bytes == BUFFER_SIZE {
-        read_bytes = stream.read(&mut buffer)?;
-        total_read_bytes = total_read_bytes + read_bytes;
-        message_bytes.extend(&buffer[0..read_bytes]);
+        match stream.read(&mut buffer) {
+            Ok(read_bytes) => {
+                total_read_bytes = total_read_bytes + read_bytes;
+                message_bytes.extend(&buffer[0..read_bytes]);
+            },
+            Err(_) => {
+                read_bytes = 0
+            }
+        }
     }
 
-    if read_bytes == 0 {
+    if total_read_bytes == 0 {
         Ok(None)
     } else {
         let (parsed, position) = protocol::parse_data_type(&message_bytes, 0)?;
@@ -46,7 +52,7 @@ fn main() -> Result<(), anyhow::Error> {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
     for incoming_connection in listener.incoming() {
         let mut stream = incoming_connection?;
-        stream.set_read_timeout(Some(Duration::new(5, 0)))?;
+        stream.set_read_timeout(Some(Duration::new(1, 0)))?;
         println!("accepted new connection");
 
         let mut first_message: Option<Box<dyn DataType>> = None;
