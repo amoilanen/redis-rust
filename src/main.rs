@@ -51,7 +51,7 @@ fn server_worker(stream: &mut TcpStream) -> Result<(), anyhow::Error> {
     stream.set_read_timeout(Some(Duration::new(1, 0)))?;
     println!("accepted new connection");
 
-    let expected_ping_message = protocol::DataType::Array {
+    let ping_message = protocol::DataType::Array {
         elements: vec![
             protocol::DataType::BulkString { value: "PING".as_bytes().to_vec() }
         ]
@@ -60,12 +60,26 @@ fn server_worker(stream: &mut TcpStream) -> Result<(), anyhow::Error> {
     loop {
         if let Some(received_message) = read_message(stream)? {
             println!("Received: {}", String::from_utf8_lossy(&received_message.serialize()));
-            if received_message == expected_ping_message {
+            if received_message == ping_message {
                 let reply = protocol::DataType::SimpleString {
                     value: "PONG".as_bytes().to_vec()
                 }.serialize();
                 stream.write_all(&reply)?;
                 println!("Replied with pong")
+            } else {
+                match received_message {
+                    protocol::DataType::Array { elements } => {
+                        if let Some(first_element) = elements.get(0) {
+                            if *first_element == (protocol::DataType::BulkString { value: "ECHO".as_bytes().to_vec() }) {
+                                println!("Received ECHO");
+                                if let Some(echo_argument) = elements.get(1) {
+                                    stream.write_all(&echo_argument.serialize())?
+                                }
+                            }
+                        }
+                    },
+                    _ => ()
+                }
             }
         }
         //TODO: Terminate the connection when requested by the client
