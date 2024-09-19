@@ -1,7 +1,8 @@
 use std::{io::{Read, Write}, net::{TcpListener, TcpStream}};
+use std::collections::HashMap;
 use std::time::Duration;
-use crate::protocol::DataType;
 use std::thread;
+use std::sync::{Arc, Mutex};
 
 use crate::error::RedisError;
 
@@ -47,13 +48,14 @@ pub(crate) fn read_message(stream: &mut TcpStream) -> Result<Option<protocol::Da
     }
 }
 
-fn server_worker(stream: &mut TcpStream) -> Result<(), anyhow::Error> {
+fn server_worker(stream: &mut TcpStream, redis_data: &Arc<Mutex<HashMap<String, Vec<u8>>>>) -> Result<(), anyhow::Error> {
     stream.set_read_timeout(Some(Duration::new(1, 0)))?;
     println!("accepted new connection");
+    println!("{:?}", redis_data);
 
     let ping_message = protocol::DataType::Array {
         elements: vec![
-            protocol::DataType::BulkString { value: "PING".as_bytes().to_vec() }
+            protocol::DataType::BulkString { value: Some("PING".as_bytes().to_vec()) }
         ]
     };
 
@@ -70,11 +72,39 @@ fn server_worker(stream: &mut TcpStream) -> Result<(), anyhow::Error> {
                 match received_message {
                     protocol::DataType::Array { elements } => {
                         if let Some(first_element) = elements.get(0) {
-                            if *first_element == (protocol::DataType::BulkString { value: "ECHO".as_bytes().to_vec() }) {
+                            let first = first_element.as_string()?;
+                            if first == "ECHO" {
                                 println!("Received ECHO");
                                 if let Some(echo_argument) = elements.get(1) {
                                     stream.write_all(&echo_argument.serialize())?
                                 }
+                            } else if first == "SET" {
+                                let error = RedisError { 
+                                    message: "SET command should have two arguments".to_string()
+                                };
+                                let key = elements.get(1).ok_or::<anyhow::Error>(error.clone().into())?.as_string()?;
+                                let value = elements.get(2).ok_or::<anyhow::Error>(error.into())?.as_string()?;
+                                println!("SET {} {}", key, value);
+                                let mut data = redis_data.lock().unwrap(); //TODO: Avoid unwrap
+                                data.insert(key, value.as_bytes().to_vec());
+                                let reply = protocol::DataType::SimpleString { value: "OK".as_bytes().to_vec() };
+                                stream.write_all(&reply.serialize())?;
+                            } else if first == "GET" {
+                                let error = RedisError { 
+                                    message: "GET command should have one argument".to_string()
+                                };
+                                let key = elements.get(1).ok_or::<anyhow::Error>(error.clone().into())?.as_string()?;
+                                println!("GET {}", key);
+                                let data = redis_data.lock().unwrap(); //TODO: Avoid unwrap
+                                let reply = match data.get(&key) {
+                                    Some(value) => {
+                                        protocol::DataType::BulkString { value: Some(value.clone()) }
+                                    },
+                                    None => {
+                                        protocol::DataType::BulkString { value: None }
+                                    }
+                                };
+                                stream.write_all(&reply.serialize())?;
                             }
                         }
                     },
@@ -91,10 +121,12 @@ fn main() -> Result<(), anyhow::Error> {
     println!("Logs from your program will appear here!");
 
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    let redis_data: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
     for incoming_connection in listener.incoming() {
         let mut stream = incoming_connection?;
+        let per_thread_redis_data = Arc::clone(&redis_data);
         thread::spawn(move || {
-            server_worker(&mut stream)
+            server_worker(&mut stream, &per_thread_redis_data)
         });
     }
     Ok(())

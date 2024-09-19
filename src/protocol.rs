@@ -54,7 +54,7 @@ pub(crate) enum DataType {
         value: Vec<u8>
     },
     BulkString {
-        value: Vec<u8>
+        value: Option<Vec<u8>>
     },
     BulkError {
         value: Vec<u8>
@@ -85,6 +85,82 @@ pub(crate) enum DataType {
 }
 
 impl DataType {
+
+    pub(crate) fn as_string(&self) -> Result<String, anyhow::Error> {
+        let mut result: Vec<u8> = Vec::new();
+        match &self {
+            &DataType::Double { value } => {
+                result.extend(value.to_string().as_bytes());
+            },
+            &DataType::BigNumber { sign, value } => {
+                if *sign == b'-' {
+                    result.push(*sign)
+                }
+                result.extend(value);
+            },
+            &DataType::Integer { value } => {
+                result.extend(value.to_string().as_bytes());
+            },
+            &DataType::SimpleError { value } => {
+                result.extend(value.as_slice());
+            },
+            &DataType::BulkString { value } => {
+                match value {
+                    Some(value) => {
+                        result.extend(value.as_slice())
+                    },
+                    None => ()
+                }
+            },
+            &DataType::BulkError { value } => {
+                result.extend(value.as_slice());
+            },
+            &DataType::VerbatimString { encoding, value } => {
+                result.extend(value.as_slice());
+            },
+            &DataType::SimpleString { value } => {
+                result.extend(value.as_slice());
+            },
+            &DataType::Map { entries } => {
+                for element in entries.iter() {
+                    result.extend(element.0.as_string()?.as_bytes());
+                    result.push(b':');
+                    result.extend(element.1.as_string()?.as_bytes());
+                    result.push(b',');
+                }
+            },
+            &DataType::Set { elements } => {
+                for element in elements.iter() {
+                    result.extend(element.as_string()?.as_bytes());
+                    result.push(b',');
+                }
+            },
+            &DataType::Array { elements } => {
+                for element in elements.iter() {
+                    result.extend(element.as_string()?.as_bytes());
+                    result.push(b',');
+                }
+            },
+            &DataType::Push { elements } => {
+                for element in elements.iter() {
+                    result.extend(element.as_string()?.as_bytes());
+                    result.push(b',');
+                }
+            },
+            &DataType::Null => {
+                result.extend("".as_bytes().to_vec())
+            },
+            &DataType::Boolean { value } => {
+                if *value {
+                    result.push(b't');
+                } else {
+                    result.push(b'f');
+                }
+            }
+        }
+        String::from_utf8(result).map_err(|err| err.into())
+    }
+
     pub(crate) fn serialize(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::new();
         match &self {
@@ -113,9 +189,16 @@ impl DataType {
             },
             &DataType::BulkString { value } => {
                 result.push(b'$');
-                result.extend(value.len().to_string().as_bytes());
-                result.extend("\r\n".as_bytes());
-                result.extend(value.as_slice());
+                match value {
+                    Some(value) => {
+                        result.extend(value.len().to_string().as_bytes());
+                        result.extend("\r\n".as_bytes());
+                        result.extend(value.as_slice());
+                    },
+                    None => {
+                        result.extend("-1".as_bytes());
+                    }
+                }
                 result.extend("\r\n".as_bytes());
             },
             &DataType::BulkError { value } => {
@@ -302,7 +385,7 @@ fn parse_bulk_string(input: &Vec<u8>, position: usize) -> Result<(DataType, usiz
     let length_start = position + 1;
     let first_length_symbol = input.get(length_start);
 
-    let mut value: Vec<u8> = Vec::new();
+    let mut value: Option<Vec<u8>> = Some(Vec::new());
     let mut new_position = position ;
     if first_length_symbol != Some(&b'-') {
         let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
@@ -313,9 +396,10 @@ fn parse_bulk_string(input: &Vec<u8>, position: usize) -> Result<(DataType, usiz
         let value_end = length_end + 2 + string_length;
         read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
         read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-        value = input[value_start..value_end].to_vec();
+        value = Some(input[value_start..value_end].to_vec());
         new_position = value_end + 2;
     } else {
+        value = None;
         new_position = new_position + "$-1\r\n".len();
     }
     Ok((DataType::BulkString {
@@ -495,7 +579,7 @@ mod tests {
                     value: 1
                 },
                 DataType::BulkString {
-                    value: "hello".as_bytes().to_vec()
+                    value: Some("hello".as_bytes().to_vec())
                 }
             ]
         }.serialize()), "~2\r\n:1\r\n$5\r\nhello\r\n".to_string());
@@ -510,7 +594,7 @@ mod tests {
                     value: 1
                 },
                 DataType::BulkString {
-                    value: "hello".as_bytes().to_vec()
+                    value: Some("hello".as_bytes().to_vec())
                 }
             ]
         });
@@ -608,7 +692,7 @@ mod tests {
                         value: 1
                     },
                     DataType::BulkString {
-                        value: "hello".as_bytes().to_vec()
+                        value: Some("hello".as_bytes().to_vec())
                     }
                 ),
                 (
@@ -616,7 +700,7 @@ mod tests {
                         value: 2
                     },
                     DataType::BulkString {
-                        value: "world".as_bytes().to_vec()
+                        value: Some("world".as_bytes().to_vec())
                     }
                 )
             ]
@@ -633,7 +717,7 @@ mod tests {
                         value: 1
                     },
                     DataType::BulkString {
-                        value: "hello".as_bytes().to_vec()
+                        value: Some("hello".as_bytes().to_vec())
                     }
                 ),
                 (
@@ -641,7 +725,7 @@ mod tests {
                         value: 2
                     },
                     DataType::BulkString {
-                        value: "world".as_bytes().to_vec()
+                        value: Some("world".as_bytes().to_vec())
                     }
                 )
             ]
@@ -653,10 +737,10 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&DataType::Array {
             elements: vec![
                 DataType::BulkString {
-                    value: "hello".as_bytes().to_vec()
+                    value: Some("hello".as_bytes().to_vec())
                 },
                 DataType::BulkString {
-                    value: "world".as_bytes().to_vec()
+                    value: Some("world".as_bytes().to_vec())
                 }
             ]
         }.serialize()), "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".to_string());
@@ -668,10 +752,10 @@ mod tests {
         assert_eq!(parsed.0, DataType::Array {
             elements: vec![
                 DataType::BulkString {
-                    value: "hello".as_bytes().to_vec()
+                    value: Some("hello".as_bytes().to_vec())
                 },
                 DataType::BulkString {
-                    value: "world".as_bytes().to_vec()
+                    value: Some("world".as_bytes().to_vec())
                 }
             ]
         });
@@ -687,10 +771,10 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&DataType::Push {
             elements: vec![
                 DataType::BulkString {
-                    value: "hello".as_bytes().to_vec()
+                    value: Some("hello".as_bytes().to_vec())
                 },
                 DataType::BulkString {
-                    value: "world".as_bytes().to_vec()
+                    value: Some("world".as_bytes().to_vec())
                 }
             ]
         }.serialize()), ">2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".to_string());
@@ -702,10 +786,10 @@ mod tests {
         assert_eq!(parsed.0, DataType::Push {
             elements: vec![
                 DataType::BulkString {
-                    value: "hello".as_bytes().to_vec()
+                    value: Some("hello".as_bytes().to_vec())
                 },
                 DataType::BulkString {
-                    value: "world".as_bytes().to_vec()
+                    value: Some("world".as_bytes().to_vec())
                 }
             ]
         });
@@ -715,23 +799,23 @@ mod tests {
     #[test]
     fn should_serialize_bulk_string() {
         assert_eq!(String::from_utf8_lossy(&DataType::BulkString {
-            value: "This is a bulk string\r\n One, two three".as_bytes().to_vec()
+            value: Some("This is a bulk string\r\n One, two three".as_bytes().to_vec())
         }.serialize()), "$38\r\nThis is a bulk string\r\n One, two three\r\n".to_string());
     }
 
     #[test]
     fn should_parse_bulk_string() {
         assert_eq!(DataType::parse(&"$5\r\nHello\r\n".as_bytes().to_vec(), 0).unwrap(), (DataType::BulkString {
-            value: "Hello".as_bytes().to_vec()
+            value: Some("Hello".as_bytes().to_vec())
         }, 11));
         assert_eq!(DataType::parse(&"$12\r\nHello\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap(), (DataType::BulkString {
-            value: "Hello\r\nworld".as_bytes().to_vec()
+            value: Some("Hello\r\nworld".as_bytes().to_vec())
         }, 19));
         assert_eq!(DataType::parse(&"$-1\r\n".as_bytes().to_vec(), 0).unwrap(), (DataType::BulkString {
-            value: Vec::new()
+            value: None
         }, 5));
         assert_eq!(DataType::parse(&"$0\r\n\r\n".as_bytes().to_vec(), 0).unwrap(), (DataType::BulkString {
-            value: Vec::new()
+            value: Some(Vec::new())
         }, 6));
     }
 
