@@ -16,7 +16,7 @@ fn read_and_assert_symbol(input: &Vec<u8>, symbol: u8, position: usize) -> Resul
     }
 }
 
-fn read_until(input: &Vec<u8>, terminator: &Vec<u8>, position: usize) -> usize {
+fn find_position_before_terminator(input: &Vec<u8>, terminator: &Vec<u8>, position: usize) -> usize {
     let mut current = position;
     let mut end_index: Option<usize> = None;
     while end_index == None && current < input.len() {
@@ -325,7 +325,7 @@ fn parse_double(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), a
     let error_message = format!("Invalid Double '{}'", String::from_utf8_lossy(&input.clone()));
     read_and_assert_symbol(input, b',', position).context(error_message.clone())?;
     let value_start = position + 1;
-    let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), value_start);
+    let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
     read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
     let value: f64 = String::from_utf8(input[value_start..value_end].to_vec())?.parse()?;
@@ -346,7 +346,7 @@ fn parse_big_number(input: &Vec<u8>, position: usize) -> Result<(DataType, usize
         value_start = position + 2;
         sign = Some(maybe_sign);
     }
-    let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), value_start);
+    let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
     read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
     Ok((DataType::BigNumber {
@@ -359,7 +359,7 @@ fn parse_integer(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), 
     let error_message = format!("Invalid Integer '{}'", String::from_utf8_lossy(&input.clone()));
     read_and_assert_symbol(input, b':', position).context(error_message.clone())?;
     let value_start = position + 1;
-    let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), value_start);
+    let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
     read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
     Ok((DataType::Integer {
@@ -371,7 +371,7 @@ fn parse_simple_error(input: &Vec<u8>, position: usize) -> Result<(DataType, usi
     let error_message = format!("Invalid SimpleError '{}'", String::from_utf8_lossy(&input.clone()));
     read_and_assert_symbol(input, b'-', position).context(error_message.clone())?;
     let value_start = position + 1;
-    let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), value_start);
+    let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
     read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
     Ok((DataType::SimpleError {
@@ -388,7 +388,7 @@ fn parse_bulk_string(input: &Vec<u8>, position: usize) -> Result<(DataType, usiz
     let mut value: Option<Vec<u8>> = Some(Vec::new());
     let mut new_position = position ;
     if first_length_symbol != Some(&b'-') {
-        let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
+        let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
         let string_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
         read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
         read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
@@ -411,7 +411,7 @@ fn parse_bulk_error(input: &Vec<u8>, position: usize) -> Result<(DataType, usize
     let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(&input.clone()));
     read_and_assert_symbol(input, b'!', position).context(error_message.clone())?;
     let length_start = position + 1;
-    let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
+    let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
     let content_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
     read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
@@ -428,7 +428,7 @@ fn parse_verbatim_string(input: &Vec<u8>, position: usize) -> Result<(DataType, 
     let error_message = format!("Invalid VerbatimString '{}'", String::from_utf8_lossy(&input.clone()));
     read_and_assert_symbol(input, b'=', position).context(error_message.clone())?;
     let length_start = position + 1;
-    let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
+    let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
     let content_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
     read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
@@ -450,7 +450,7 @@ fn parse_simple_string(input: &Vec<u8>, position: usize) -> Result<(DataType, us
     let error_message = format!("Invalid SimpleString '{}'", String::from_utf8_lossy(&input.clone()));
     read_and_assert_symbol(input, b'+', position).context(error_message.clone())?;
     let value_start = position + 1;
-    let value_end = read_until(input, &"\r\n".as_bytes().to_vec(), value_start);
+    let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
     read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
     Ok((DataType::SimpleString {
@@ -462,7 +462,7 @@ fn parse_map(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyh
     let error_message = format!("Invalid Map '{}'", String::from_utf8_lossy(&input.clone()));
     read_and_assert_symbol(input, b'%', position).context(error_message.clone())?;
     let length_start = position + 1;
-    let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
+    let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
     let map_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
     read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
@@ -485,7 +485,7 @@ fn parse_set(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyh
     let error_message = format!("Invalid Set '{}'", String::from_utf8_lossy(&input.clone()));
     read_and_assert_symbol(input, b'~', position).context(error_message.clone())?;
     let length_start = position + 1;
-    let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
+    let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
     let map_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
     read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
@@ -518,7 +518,7 @@ fn parse_array_like(input: &Vec<u8>, position: usize, prefix: u8) -> Result<(Vec
     let error_message = format!("Invalid Array-like '{}'", String::from_utf8_lossy(&input.clone()));
     read_and_assert_symbol(input, prefix, position).context(error_message.clone())?;
     let length_start = position + 1;
-    let length_end = read_until(input, &"\r\n".as_bytes().to_vec(), length_start);
+    let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
     let array_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
     read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
