@@ -26,10 +26,8 @@ fn server_worker(stream: &mut TcpStream, redis_data: &Arc<Mutex<HashMap<String, 
         if let Some(received_message) = io::read_message(stream)? {
             println!("Received: {}", String::from_utf8_lossy(&received_message.serialize()));
             if received_message == ping_message {
-                let reply = protocol::DataType::SimpleString {
-                    value: "PONG".as_bytes().to_vec()
-                }.serialize();
-                stream.write_all(&reply)?;
+                let reply = protocol::simple_string("PONG");
+                stream.write_all(&reply.serialize())?;
                 println!("Replied with pong")
             } else {
                 match received_message {

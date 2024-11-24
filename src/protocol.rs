@@ -99,7 +99,112 @@ pub(crate) enum DataType {
     }
 }
 
+pub(crate) fn double(value: f64) -> DataType {
+    DataType::Double {
+        value
+    }
+}
+
+pub(crate) fn simple_string(value: &str) -> DataType {
+    DataType::SimpleString {
+        value: value.as_bytes().to_vec()
+    }
+}
+
+//TODO: Implement the rest of the constructors
+/*
+    BigNumber {
+        sign: u8,
+        value: Vec<u8> // more efficient representation is possible
+    },
+    Integer {
+        value: i64
+    },
+    SimpleError {
+        value: Vec<u8>
+    },
+    BulkString {
+        value: Option<Vec<u8>>
+    },
+    BulkError {
+        value: Vec<u8>
+    },
+    VerbatimString {
+        encoding: Vec<u8>,
+        value: Vec<u8>
+    },
+    Map {
+        entries: Vec<(DataType, DataType)>
+    },
+    Set {
+        elements: Vec<DataType>
+    },
+    Array {
+        elements: Vec<DataType>
+    },
+    Push {
+        elements: Vec<DataType>
+    }
+*/
+
+/*
+pub(crate) fn big_number(value: f64) -> DataType {
+}
+
+pub(crate) fn integer(value: f64) -> DataType {
+}
+
+pub(crate) fn simple_error(value: f64) -> DataType {
+}
+
+pub(crate) fn bulk_string(value: f64) -> DataType {
+}
+
+pub(crate) fn bulk_error(value: f64) -> DataType {
+}
+
+pub(crate) fn verbatim_string(value: f64) -> DataType {
+}
+
+pub(crate) fn map(value: f64) -> DataType {
+}
+
+pub(crate) fn set(value: f64) -> DataType {
+}
+
+pub(crate) fn array(value: f64) -> DataType {
+}
+
+pub(crate) fn push(value: f64) -> DataType {
+}
+*/
+
+pub(crate) fn null() -> DataType {
+    DataType::Null
+}
+
+pub(crate) fn boolean(value: bool) -> DataType {
+    DataType::Boolean {
+        value
+    }
+}
+
 impl DataType {
+
+    pub(crate) fn as_array(&self) -> Result<Vec<String>, anyhow::Error> {
+        match &self {
+            &DataType::Array { elements } => {
+                let mut result: Vec<String> = Vec::new();
+                for element in elements.iter() {
+                    result.push(element.as_string()?);
+                }
+                Ok(result)
+            },
+            _ => {
+                Ok(vec![self.as_string()?])
+            }
+        }
+    }
 
     pub(crate) fn as_string(&self) -> Result<String, anyhow::Error> {
         let mut result: Vec<u8> = Vec::new();
