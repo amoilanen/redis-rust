@@ -2,6 +2,21 @@ use anyhow::Context;
 
 use crate::error::RedisError;
 
+pub(crate) fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyhow::Error> {
+    let (parsed, position) = DataType::parse(&message_bytes, 0)?;
+    if position == message_bytes.len() {
+        Ok(parsed)
+    } else {
+        Err(RedisError { 
+            message: format!("Could not parse '{}': symbols after position {} are left unconsumed, total symbols {}",
+                String::from_utf8_lossy(&message_bytes.clone()),
+                position,
+                message_bytes.len()
+            )
+        }.into())
+    }
+}
+
 fn read_and_assert_symbol(input: &Vec<u8>, symbol: u8, position: usize) -> Result<usize, anyhow::Error> {
     let error_message = format!("Expected symbol '{}' in '{}' at position {}", symbol as char, String::from_utf8_lossy(&input.clone()), position);
     let &actual_symbol = input.get(position).ok_or::<anyhow::Error>(RedisError {

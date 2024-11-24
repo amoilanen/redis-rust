@@ -1,4 +1,4 @@
-use std::{io::{Read, Write}, net::{TcpListener, TcpStream}};
+use std::{io::Write, net::{TcpListener, TcpStream}};
 use std::collections::HashMap;
 use std::time::Duration;
 use std::thread;
@@ -9,45 +9,7 @@ use crate::error::RedisError;
 
 mod protocol;
 mod error;
-
-const BUFFER_SIZE: usize = 2048;
-
-pub(crate) fn read_message(stream: &mut TcpStream) -> Result<Option<protocol::DataType>, anyhow::Error> {
-    let mut buffer = [0u8; BUFFER_SIZE];
-    let mut message_bytes: Vec<u8> = Vec::new();
-    let mut read_bytes = stream.read(&mut buffer)?;
-    let mut total_read_bytes = read_bytes;
-    message_bytes.extend(&buffer[0..read_bytes]);
-
-    while read_bytes == BUFFER_SIZE {
-        match stream.read(&mut buffer) {
-            Ok(read_bytes) => {
-                total_read_bytes = total_read_bytes + read_bytes;
-                message_bytes.extend(&buffer[0..read_bytes]);
-            },
-            Err(_) => {
-                read_bytes = 0
-            }
-        }
-    }
-
-    if total_read_bytes == 0 {
-        Ok(None)
-    } else {
-        let (parsed, position) = protocol::DataType::parse(&message_bytes, 0)?;
-        if position == message_bytes.len() {
-            Ok(Some(parsed))
-        } else {
-            Err(RedisError { 
-                message: format!("Could not parse '{}': symbols after position {} are left unconsumed, total symbols {}",
-                    String::from_utf8_lossy(&message_bytes.clone()),
-                    position,
-                    message_bytes.len()
-                )
-            }.into())
-        }
-    }
-}
+mod io;
 
 fn server_worker(stream: &mut TcpStream, redis_data: &Arc<Mutex<HashMap<String, StoredValue>>>) -> Result<(), anyhow::Error> {
     stream.set_read_timeout(Some(Duration::new(1, 0)))?;
@@ -61,7 +23,7 @@ fn server_worker(stream: &mut TcpStream, redis_data: &Arc<Mutex<HashMap<String, 
     };
 
     loop {
-        if let Some(received_message) = read_message(stream)? {
+        if let Some(received_message) = io::read_message(stream)? {
             println!("Received: {}", String::from_utf8_lossy(&received_message.serialize()));
             if received_message == ping_message {
                 let reply = protocol::DataType::SimpleString {
