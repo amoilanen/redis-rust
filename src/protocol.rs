@@ -53,7 +53,7 @@ fn find_position_before_terminator(input: &Vec<u8>, terminator: &Vec<u8>, positi
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) enum DataType {
     Double {
         value: f64
@@ -108,6 +108,12 @@ pub(crate) fn double(value: f64) -> DataType {
 pub(crate) fn simple_string(value: &str) -> DataType {
     DataType::SimpleString {
         value: value.as_bytes().to_vec()
+    }
+}
+
+pub(crate) fn bulk_string(value: Option<Vec<u8>>) -> DataType {
+    DataType::BulkString {
+        value
     }
 }
 
