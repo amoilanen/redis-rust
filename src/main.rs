@@ -3,18 +3,19 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::thread;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::storage::{ Storage, StoredValue };
 use crate::error::RedisError;
 
 mod protocol;
 mod error;
 mod io;
+mod storage;
 
-fn server_worker(stream: &mut TcpStream, redis_data: &Arc<Mutex<HashMap<String, StoredValue>>>) -> Result<(), anyhow::Error> {
+fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>) -> Result<(), anyhow::Error> {
     stream.set_read_timeout(Some(Duration::new(1, 0)))?;
     println!("accepted new connection");
-    println!("{:?}", redis_data);
+    println!("{:?}", storage);
     loop {
         if let Some(received_message) = io::read_message(stream)? {
             println!("Received: {}", String::from_utf8_lossy(&received_message.serialize()));
@@ -48,8 +49,8 @@ fn server_worker(stream: &mut TcpStream, redis_data: &Arc<Mutex<HashMap<String, 
                         };
                         println!("SET {} {}", key, value);
                         println!("expiration_after = {:?}", expires_in_ms);
-                        let mut data = redis_data.lock().unwrap(); //TODO: Avoid unwrap
-                        data.insert(key.to_owned(), StoredValue::from(value.as_bytes().to_vec(), expires_in_ms)?);
+                        let mut data = storage.lock().unwrap(); //TODO: Avoid unwrap
+                        data.set(key, value.as_bytes().to_vec(), expires_in_ms)?;
                         reply = Some(protocol::simple_string("OK"));
                     } else if command == "GET" {
                         let error = RedisError { 
@@ -57,24 +58,12 @@ fn server_worker(stream: &mut TcpStream, redis_data: &Arc<Mutex<HashMap<String, 
                         };
                         let key = command_parts.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
                         println!("GET {}", key);
-                        let data = redis_data.lock().unwrap(); //TODO: Avoid unwrap
-                        reply = match data.get(&key.to_string()) {
-                            Some(stored_value) => {
-                                let current_time_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-                                let has_value_expired = if let Some(expires_in_ms) = stored_value.expires_in_ms {
-                                    current_time_ms >= stored_value.last_modified_timestamp + expires_in_ms as u128
-                                } else {
-                                    false
-                                };
-                                if has_value_expired {
-                                    Some(protocol::bulk_string(None))
-                                } else {
-                                    Some(protocol::bulk_string(Some(stored_value.value.clone())))
-                                }
-                            },
-                            None => {
+                        let mut data = storage.lock().unwrap(); //TODO: Avoid unwrap
+                        reply = match data.get(&key.to_string())? {
+                            Some(value) => 
+                                Some(protocol::bulk_string(Some(value.clone()))),
+                            None =>
                                 Some(protocol::bulk_string(None))
-                            }
                         };
                     }
                     if let Some(reply) = reply {
@@ -88,34 +77,18 @@ fn server_worker(stream: &mut TcpStream, redis_data: &Arc<Mutex<HashMap<String, 
     }
 }
 
-#[derive(Debug, PartialEq)]
-struct StoredValue {
-    expires_in_ms: Option<u64>,
-    last_modified_timestamp: u128,
-    value: Vec<u8>
-}
-
-impl StoredValue {
-    fn from(value: Vec<u8>, expires_in_ms: Option<u64>) -> Result<StoredValue, anyhow::Error> {
-        Ok(StoredValue {
-            expires_in_ms,
-            last_modified_timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis(),
-            value
-        })
-    }
-}
-
 fn main() -> Result<(), anyhow::Error> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
-    let redis_data: Arc<Mutex<HashMap<String, StoredValue>>> = Arc::new(Mutex::new(HashMap::new()));
+    let redis_data: HashMap<String, StoredValue> = HashMap::new();
+    let storage: Arc<Mutex<Storage>> = Arc::new(Mutex::new(Storage::new(redis_data)));
     for incoming_connection in listener.incoming() {
         let mut stream = incoming_connection?;
-        let per_thread_redis_data = Arc::clone(&redis_data);
+        let per_thread_storage = Arc::clone(&storage);
         thread::spawn(move || {
-            server_worker(&mut stream, &per_thread_redis_data)
+            server_worker(&mut stream, &per_thread_storage)
         });
     }
     Ok(())
