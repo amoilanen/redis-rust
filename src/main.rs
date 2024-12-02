@@ -4,13 +4,10 @@ use std::time::Duration;
 use std::thread;
 use std::sync::{Arc, Mutex};
 
-use crate::storage::{ Storage, StoredValue };
-use crate::error::RedisError;
-
-mod protocol;
-mod error;
-mod io;
-mod storage;
+use redis_starter_rust::storage::{ Storage, StoredValue };
+use redis_starter_rust::error::RedisError;
+use redis_starter_rust::protocol;
+use redis_starter_rust::io;
 
 fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>) -> Result<(), anyhow::Error> {
     stream.set_read_timeout(Some(Duration::new(1, 0)))?;
@@ -78,9 +75,6 @@ fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>) -> Resul
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
-
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
     let redis_data: HashMap<String, StoredValue> = HashMap::new();
     let storage: Arc<Mutex<Storage>> = Arc::new(Mutex::new(Storage::new(redis_data)));

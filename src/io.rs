@@ -3,7 +3,7 @@ use crate::protocol;
 
 const BUFFER_SIZE: usize = 2048;
 
-pub(crate) fn read_message(stream: &mut TcpStream) -> Result<Option<protocol::DataType>, anyhow::Error> {
+pub fn read_message(stream: &mut TcpStream) -> Result<Option<protocol::DataType>, anyhow::Error> {
     if let Some(message_bytes) = read_bytes(stream)? {
         Ok(Some(protocol::read_message_from_bytes(&message_bytes)?))
     } else {

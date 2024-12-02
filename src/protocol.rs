@@ -2,7 +2,7 @@ use anyhow::Context;
 
 use crate::error::RedisError;
 
-pub(crate) fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyhow::Error> {
+pub fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyhow::Error> {
     let (parsed, position) = DataType::parse(&message_bytes, 0)?;
     if position == message_bytes.len() {
         Ok(parsed)
@@ -54,7 +54,7 @@ fn find_position_before_terminator(input: &Vec<u8>, terminator: &Vec<u8>, positi
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub(crate) enum DataType {
+pub enum DataType {
     Double {
         value: f64
     },
@@ -99,19 +99,19 @@ pub(crate) enum DataType {
     }
 }
 
-pub(crate) fn double(value: f64) -> DataType {
+pub fn double(value: f64) -> DataType {
     DataType::Double {
         value
     }
 }
 
-pub(crate) fn simple_string(value: &str) -> DataType {
+pub fn simple_string(value: &str) -> DataType {
     DataType::SimpleString {
         value: value.as_bytes().to_vec()
     }
 }
 
-pub(crate) fn bulk_string(value: Option<Vec<u8>>) -> DataType {
+pub fn bulk_string(value: Option<Vec<u8>>) -> DataType {
     DataType::BulkString {
         value
     }
@@ -185,11 +185,11 @@ pub(crate) fn push(value: f64) -> DataType {
 }
 */
 
-pub(crate) fn null() -> DataType {
+pub fn null() -> DataType {
     DataType::Null
 }
 
-pub(crate) fn boolean(value: bool) -> DataType {
+pub fn boolean(value: bool) -> DataType {
     DataType::Boolean {
         value
     }
@@ -197,7 +197,7 @@ pub(crate) fn boolean(value: bool) -> DataType {
 
 impl DataType {
 
-    pub(crate) fn as_array(&self) -> Result<Vec<String>, anyhow::Error> {
+    pub fn as_array(&self) -> Result<Vec<String>, anyhow::Error> {
         match &self {
             &DataType::Array { elements } => {
                 let mut result: Vec<String> = Vec::new();
@@ -212,7 +212,7 @@ impl DataType {
         }
     }
 
-    pub(crate) fn as_string(&self) -> Result<String, anyhow::Error> {
+    pub fn as_string(&self) -> Result<String, anyhow::Error> {
         let mut result: Vec<u8> = Vec::new();
         match &self {
             &DataType::Double { value } => {
@@ -287,7 +287,7 @@ impl DataType {
         String::from_utf8(result).map_err(|err| err.into())
     }
 
-    pub(crate) fn serialize(&self) -> Vec<u8> {
+    pub fn serialize(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::new();
         match &self {
             &DataType::Double { value } => {

@@ -2,22 +2,22 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct Storage {
+pub struct Storage {
     data: HashMap<String, StoredValue>
 }
 
 impl Storage {
-    pub(crate) fn new(data: HashMap<String, StoredValue>) -> Storage {
+    pub fn new(data: HashMap<String, StoredValue>) -> Storage {
         Storage {
             data
         }
     }
 
-    pub(crate) fn set(&mut self, key: &str, value: Vec<u8>, expires_in_ms: Option<u64>) -> Result<Option<StoredValue>, anyhow::Error> {
+    pub fn set(&mut self, key: &str, value: Vec<u8>, expires_in_ms: Option<u64>) -> Result<Option<StoredValue>, anyhow::Error> {
         Ok(self.data.insert(key.to_owned(), StoredValue::from(value, expires_in_ms)?))
     }
 
-    pub(crate) fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>, anyhow::Error> {
+    pub fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>, anyhow::Error> {
         let value = match self.data.get(&key.to_owned()) {
             Some(stored_value) => {
               let current_time_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
@@ -39,7 +39,7 @@ impl Storage {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct StoredValue {
+pub struct StoredValue {
     expires_in_ms: Option<u64>,
     last_modified_timestamp: u128,
     value: Vec<u8>
