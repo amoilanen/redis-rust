@@ -1,3 +1,4 @@
+pub mod commands;
 pub mod protocol;
 pub mod error;
 pub mod io;
