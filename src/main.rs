@@ -1,3 +1,4 @@
+use std::env;
 use std::{io::Write, net::{TcpListener, TcpStream}};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -10,7 +11,10 @@ use redis_starter_rust::io;
 use redis_starter_rust::commands::{ self, RedisCommand };
 
 fn main() -> Result<(), anyhow::Error> {
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    const DEFAULT_PORT: usize = 6379;
+    let port = get_port(DEFAULT_PORT)?;
+    let server_address = format!("127.0.0.1:{}", port);
+    let listener = TcpListener::bind(server_address)?;
     let redis_data: HashMap<String, StoredValue> = HashMap::new();
     let storage: Arc<Mutex<Storage>> = Arc::new(Mutex::new(Storage::new(redis_data)));
     for incoming_connection in listener.incoming() {
@@ -21,6 +25,17 @@ fn main() -> Result<(), anyhow::Error> {
         });
     }
     Ok(())
+}
+
+fn get_port(default_port: usize) -> Result<usize, anyhow::Error> {
+    let args: Vec<String> = env::args().collect();
+    let mut port = default_port;
+    if args.get(1).map(|x| x.as_str()) == Some("--port") {
+        if let Some(port_input) = args.get(2) {
+            port = port_input.parse()?;
+        }
+    }
+    Ok(port)
 }
 
 fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>) -> Result<(), anyhow::Error> {
