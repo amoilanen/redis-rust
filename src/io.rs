@@ -11,25 +11,32 @@ pub fn read_message(stream: &mut TcpStream) -> Result<Option<protocol::DataType>
     }
 }
 
+fn read_next_bytes(stream: &mut TcpStream, buffer: &mut [u8]) -> usize {
+    match stream.read(buffer) {
+        Ok(read_bytes) => {
+            read_bytes
+        }
+        Err(_) => {
+            0
+        }
+    }
+}
+
 pub(crate) fn read_bytes(stream: &mut TcpStream) -> Result<Option<Vec<u8>>, anyhow::Error> {
     let mut buffer = [0u8; BUFFER_SIZE];
     let mut message_bytes: Vec<u8> = Vec::new();
-    let mut read_bytes = stream.read(&mut buffer)?;
-    let mut total_read_bytes = read_bytes;
-    message_bytes.extend(&buffer[0..read_bytes]);
+    let mut total_read_bytes = 0;
 
-    while read_bytes == BUFFER_SIZE {
-        match stream.read(&mut buffer) {
-            Ok(read_bytes) => {
-                total_read_bytes = total_read_bytes + read_bytes;
-                message_bytes.extend(&buffer[0..read_bytes]);
-            },
-            Err(_) => {
-                read_bytes = 0
-            }
+    loop {
+        let read_bytes = read_next_bytes(stream, &mut buffer);
+        if read_bytes > 0 {
+            total_read_bytes = total_read_bytes + read_bytes;
+            message_bytes.extend(&buffer[0..read_bytes]);
+        }
+        if read_bytes < BUFFER_SIZE {
+            break;
         }
     }
-
     if total_read_bytes == 0 {
         Ok(None)
     } else {

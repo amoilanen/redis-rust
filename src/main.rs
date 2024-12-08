@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use redis_starter_rust::storage::{ Storage, StoredValue };
 use redis_starter_rust::protocol;
 use redis_starter_rust::io;
-use redis_starter_rust::commands::{ self, Command };
+use redis_starter_rust::commands::{ self, RedisCommand };
 
 fn main() -> Result<(), anyhow::Error> {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
@@ -33,7 +33,7 @@ fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>) -> Resul
             let command_name = commands::parse_command_name(&received_message)?;
             match &received_message {
                 protocol::DataType::Array { elements } => {
-                    let mut command: Option<Box<dyn Command>> = None;
+                    let mut command: Option<Box<dyn RedisCommand>> = None;
                     let command_name = command_name.as_str();
                     if command_name == "ECHO" {
                         command = Some(Box::new(commands::Echo { argument: elements.get(1) }));
@@ -43,6 +43,8 @@ fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>) -> Resul
                         command = Some(Box::new(commands::Set { instructions: &received_message }));
                     } else if command_name == "GET" {
                         command = Some(Box::new(commands::Get { instructions: &received_message }));
+                    } else if command_name == "COMMAND" {
+                        command = Some(Box::new(commands::Command {}))
                     }
                     if let Some(command) = command {
                         if let Some(reply) = command.execute(storage)? {
@@ -52,6 +54,8 @@ fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>) -> Resul
                 },
                 _ => ()
             }
+        } else {
+            //println!("No message has been read")
         }
         //TODO: Terminate the connection when requested by the client
     }
