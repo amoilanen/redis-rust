@@ -111,9 +111,21 @@ pub fn simple_string(value: &str) -> DataType {
     }
 }
 
-pub fn bulk_string(value: Option<Vec<u8>>) -> DataType {
+pub fn bulk_string_from_bytes(value: Vec<u8>) -> DataType {
     DataType::BulkString {
-        value
+        value: Some(value)
+    }
+}
+
+pub fn bulk_string_empty() -> DataType {
+    DataType::BulkString {
+        value: None
+    }
+}
+
+pub fn bulk_string(value: &str) -> DataType {
+    DataType::BulkString {
+        value: Some(value.as_bytes().to_vec())
     }
 }
 

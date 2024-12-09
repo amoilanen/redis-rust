@@ -53,15 +53,14 @@ pub struct Set<'a> {
 impl RedisCommand for Set<'_> {
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.instructions.as_array()?;
-        let command_parts: Vec<&str> = instructions.iter().map(|x| x.as_str()).collect();
         let error = RedisError { 
             message: "Invalid SET command syntax".to_string()
         };
-        let &key = command_parts.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
-        let &value = command_parts.get(2).ok_or::<anyhow::Error>(error.clone().into())?;
-        let expires_in_ms = if let Some(&modifier) = command_parts.get(3) {
+        let key = instructions.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
+        let value = instructions.get(2).ok_or::<anyhow::Error>(error.clone().into())?;
+        let expires_in_ms = if let Some(modifier) = instructions.get(3) {
             if modifier == "px" {
-                let expiration_time: u64 = command_parts.get(4).ok_or::<anyhow::Error>(error.clone().into())?.parse()?;
+                let expiration_time: u64 = instructions.get(4).ok_or::<anyhow::Error>(error.clone().into())?.parse()?;
                 Some(expiration_time)
             } else {
                 None
@@ -84,18 +83,17 @@ pub struct Get<'a> {
 impl RedisCommand for Get<'_> {
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.instructions.as_array()?;
-        let command_parts: Vec<&str> = instructions.iter().map(|x| x.as_str()).collect();
         let error = RedisError { 
             message: "GET command should have one argument".to_string()
         };
-        let key = command_parts.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
+        let key = instructions.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
         println!("GET {}", key);
         let mut data = storage.lock().unwrap(); //TODO: Avoid unwrap
-        let reply = match data.get(&key.to_string())? {
+        let reply = match data.get(key)? {
             Some(value) => 
-                Some(protocol::bulk_string(Some(value.clone()))),
+                Some(protocol::bulk_string_from_bytes(value.clone())),
             None =>
-                Some(protocol::bulk_string(None))
+                Some(protocol::bulk_string_empty())
         };
         Ok(reply)
     }
@@ -114,9 +112,9 @@ impl RedisCommand for Info<'_> {
         let argument = instructions.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
 
         let reply = if argument == "replication" {
-            Some(protocol::bulk_string(Some("# Replication\r\nrole:master\r\n".as_bytes().to_vec())))
+            Some(protocol::bulk_string("# Replication\r\nrole:master\r\n"))
         } else {
-            Some(protocol::bulk_string(None))
+            Some(protocol::bulk_string_empty())
         };
         Ok(reply)
     }

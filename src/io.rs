@@ -26,7 +26,6 @@ pub(crate) fn read_bytes(stream: &mut TcpStream) -> Result<Option<Vec<u8>>, anyh
     let mut buffer = [0u8; BUFFER_SIZE];
     let mut message_bytes: Vec<u8> = Vec::new();
     let mut total_read_bytes = 0;
-
     loop {
         let read_bytes = read_next_bytes(stream, &mut buffer);
         if read_bytes > 0 {
