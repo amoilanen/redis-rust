@@ -100,3 +100,24 @@ impl RedisCommand for Get<'_> {
         Ok(reply)
     }
 }
+
+pub struct Info<'a> {
+    pub instructions: &'a protocol::DataType
+}
+
+impl RedisCommand for Info<'_> {
+    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+        let instructions: Vec<String> = self.instructions.as_array()?;
+        let error = RedisError { 
+            message: "INFO command should have one argument".to_string()
+        };
+        let argument = instructions.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
+
+        let reply = if argument == "replication" {
+            Some(protocol::bulk_string(Some("# Replication\r\nrole:master\r\n".as_bytes().to_vec())))
+        } else {
+            Some(protocol::bulk_string(None))
+        };
+        Ok(reply)
+    }
+}

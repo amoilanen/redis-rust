@@ -60,6 +60,8 @@ fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>) -> Resul
                         command = Some(Box::new(commands::Get { instructions: &received_message }));
                     } else if command_name == "COMMAND" {
                         command = Some(Box::new(commands::Command {}))
+                    } else if command_name == "INFO" {
+                        command = Some(Box::new(commands::Info { instructions: &received_message }))
                     }
                     if let Some(command) = command {
                         if let Some(reply) = command.execute(storage)? {
