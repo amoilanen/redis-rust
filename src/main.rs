@@ -9,10 +9,17 @@ use redis_starter_rust::storage::{ Storage, StoredValue };
 use redis_starter_rust::protocol;
 use redis_starter_rust::io;
 use redis_starter_rust::commands::{ self, RedisCommand };
+use redis_starter_rust::configuration::ServerConfiguration;
 
 fn main() -> Result<(), anyhow::Error> {
     const DEFAULT_PORT: usize = 6379;
-    let port = get_port(DEFAULT_PORT)?;
+    let args: Vec<String> = env::args().collect();
+    //let args: Vec<String> = vec!["", "", "--port", "6380", "--replicaof", "'localhost 6379'"].iter().map(|x| x.to_string()).collect();
+    let port = get_port(&args)?.unwrap_or(DEFAULT_PORT);
+    let replica_of = get_replica_of(&args);
+    let server_configuration = Arc::new(ServerConfiguration {
+        replica_of
+    });
     let server_address = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(server_address)?;
     let redis_data: HashMap<String, StoredValue> = HashMap::new();
@@ -20,25 +27,36 @@ fn main() -> Result<(), anyhow::Error> {
     for incoming_connection in listener.incoming() {
         let mut stream = incoming_connection?;
         let per_thread_storage = Arc::clone(&storage);
+        let configuration = Arc::clone(&server_configuration);
         thread::spawn(move || {
-            server_worker(&mut stream, &per_thread_storage)
+            server_worker(&mut stream, &per_thread_storage, &configuration)
         });
     }
     Ok(())
 }
 
-fn get_port(default_port: usize) -> Result<usize, anyhow::Error> {
-    let args: Vec<String> = env::args().collect();
-    let mut port = default_port;
-    if args.get(1).map(|x| x.as_str()) == Some("--port") {
-        if let Some(port_input) = args.get(2) {
-            port = port_input.parse()?;
-        }
-    }
-    Ok(port)
+fn get_replica_of(args: &[String]) -> Option<String> {
+    get_option_value("replicaof", args)
 }
 
-fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>) -> Result<(), anyhow::Error> {
+fn get_port(args: &[String]) -> Result<Option<usize>, anyhow::Error> {
+    match get_option_value("port", args) {
+        Some(p) => Ok(Some(p.parse()?)),
+        None => Ok(None)
+    }
+}
+
+fn get_option_value(option_name: &str, args: &[String]) -> Option<String> {
+    let mut option_value = None;
+    if let Some(option_position) = args.iter().position(|x| x == &format!("--{}", option_name)) {
+        if let Some(option_input) = args.get(option_position + 1) {
+            option_value = Some(option_input.to_owned());
+        }
+    }
+    option_value
+}
+
+fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, server_configuration: &Arc<ServerConfiguration>) -> Result<(), anyhow::Error> {
     stream.set_read_timeout(Some(Duration::new(1, 0)))?;
     println!("accepted new connection");
     println!("{:?}", storage);
@@ -61,7 +79,7 @@ fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>) -> Resul
                     } else if command_name == "COMMAND" {
                         command = Some(Box::new(commands::Command {}))
                     } else if command_name == "INFO" {
-                        command = Some(Box::new(commands::Info { instructions: &received_message }))
+                        command = Some(Box::new(commands::Info { instructions: &received_message, server_configuration }))
                     }
                     if let Some(command) = command {
                         if let Some(reply) = command.execute(storage)? {

@@ -2,7 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::error::RedisError;
 use crate::protocol;
-use crate::storage::Storage;
+use crate::configuration;
+use crate::storage;
 
 pub fn parse_command_name(received_message: &protocol::DataType) -> Result<String, anyhow::Error> {
     let received_message_parts: Vec<String> = received_message.as_array()?;
@@ -12,7 +13,7 @@ pub fn parse_command_name(received_message: &protocol::DataType) -> Result<Strin
 }
 
 pub trait RedisCommand {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error>;
+    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error>;
 }
 
 pub struct Echo<'a> {
@@ -20,7 +21,7 @@ pub struct Echo<'a> {
 }
 
 impl RedisCommand for Echo<'_> {
-    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
         let mut reply: Option<protocol::DataType> = None;
         if let Some(echo_argument) = self.argument {
             reply = Some(echo_argument.clone());
@@ -32,7 +33,7 @@ impl RedisCommand for Echo<'_> {
 pub struct Ping {}
 
 impl RedisCommand for Ping {
-    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
         return Ok(Some(protocol::simple_string("PONG")));
     }
 }
@@ -40,7 +41,7 @@ impl RedisCommand for Ping {
 pub struct Command {}
 
 impl RedisCommand for Command {
-    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
         //TODO: Should return the list of all the available commands and their documentation instead
         return Ok(Some(protocol::simple_string("OK")));
     }
@@ -51,7 +52,7 @@ pub struct Set<'a> {
 }
 
 impl RedisCommand for Set<'_> {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.instructions.as_array()?;
         let error = RedisError { 
             message: "Invalid SET command syntax".to_string()
@@ -81,7 +82,7 @@ pub struct Get<'a> {
 }
 
 impl RedisCommand for Get<'_> {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.instructions.as_array()?;
         let error = RedisError { 
             message: "GET command should have one argument".to_string()
@@ -100,11 +101,12 @@ impl RedisCommand for Get<'_> {
 }
 
 pub struct Info<'a> {
-    pub instructions: &'a protocol::DataType
+    pub instructions: &'a protocol::DataType,
+    pub server_configuration: &'a configuration::ServerConfiguration
 }
 
 impl RedisCommand for Info<'_> {
-    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.instructions.as_array()?;
         let error = RedisError { 
             message: "INFO command should have one argument".to_string()
@@ -112,7 +114,11 @@ impl RedisCommand for Info<'_> {
         let argument = instructions.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
 
         let reply = if argument == "replication" {
-            Some(protocol::bulk_string("# Replication\r\nrole:master\r\n"))
+            let role = match &self.server_configuration.replica_of {
+                Some(_) => "slave",
+                None => "master"
+            };
+            Some(protocol::bulk_string(&format!("# Replication\r\nrole:{}\r\n", role)))
         } else {
             Some(protocol::bulk_string_empty())
         };

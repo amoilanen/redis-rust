@@ -1,3 +1,4 @@
+pub mod configuration;
 pub mod commands;
 pub mod protocol;
 pub mod error;
