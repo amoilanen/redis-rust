@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::error::RedisError;
 use crate::protocol;
-use crate::configuration;
+use crate::server_state;
 use crate::storage;
 
 pub fn parse_command_name(received_message: &protocol::DataType) -> Result<String, anyhow::Error> {
@@ -102,7 +102,7 @@ impl RedisCommand for Get<'_> {
 
 pub struct Info<'a> {
     pub instructions: &'a protocol::DataType,
-    pub server_configuration: &'a configuration::ServerConfiguration
+    pub server_state: &'a server_state::ServerState
 }
 
 impl RedisCommand for Info<'_> {
@@ -114,11 +114,19 @@ impl RedisCommand for Info<'_> {
         let argument = instructions.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
 
         let reply = if argument == "replication" {
-            let role = match &self.server_configuration.replica_of {
+            let role = match &self.server_state.replica_of {
                 Some(_) => "slave",
                 None => "master"
             };
-            Some(protocol::bulk_string(&format!("# Replication\r\nrole:{}\r\n", role)))
+            let additional_info = match role {
+                "slave" => "".to_owned(),
+                "master" => format!("master_replid:{}\r\nmaster_repl_offset:{}\r\n",
+                    &self.server_state.master_replication_id.clone().unwrap_or("".to_owned()),
+                    &self.server_state.master_replication_offset.unwrap_or(0)
+                ),
+                _ => "".to_owned()
+            };
+            Some(protocol::bulk_string(&format!("# Replication\r\nrole:{}\r\n{}", role, additional_info)))
         } else {
             Some(protocol::bulk_string_empty())
         };

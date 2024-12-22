@@ -9,7 +9,7 @@ use redis_starter_rust::storage::{ Storage, StoredValue };
 use redis_starter_rust::protocol;
 use redis_starter_rust::io;
 use redis_starter_rust::commands::{ self, RedisCommand };
-use redis_starter_rust::configuration::ServerConfiguration;
+use redis_starter_rust::server_state::ServerState;
 
 fn main() -> Result<(), anyhow::Error> {
     const DEFAULT_PORT: usize = 6379;
@@ -17,9 +17,7 @@ fn main() -> Result<(), anyhow::Error> {
     //let args: Vec<String> = vec!["", "", "--port", "6380", "--replicaof", "'localhost 6379'"].iter().map(|x| x.to_string()).collect();
     let port = get_port(&args)?.unwrap_or(DEFAULT_PORT);
     let replica_of = get_replica_of(&args);
-    let server_configuration = Arc::new(ServerConfiguration {
-        replica_of
-    });
+    let server_state = Arc::new(ServerState::new(replica_of));
     let server_address = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(server_address)?;
     let redis_data: HashMap<String, StoredValue> = HashMap::new();
@@ -27,9 +25,9 @@ fn main() -> Result<(), anyhow::Error> {
     for incoming_connection in listener.incoming() {
         let mut stream = incoming_connection?;
         let per_thread_storage = Arc::clone(&storage);
-        let configuration = Arc::clone(&server_configuration);
+        let server_state = Arc::clone(&server_state);
         thread::spawn(move || {
-            server_worker(&mut stream, &per_thread_storage, &configuration)
+            server_worker(&mut stream, &per_thread_storage, &server_state)
         });
     }
     Ok(())
@@ -56,7 +54,7 @@ fn get_option_value(option_name: &str, args: &[String]) -> Option<String> {
     option_value
 }
 
-fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, server_configuration: &Arc<ServerConfiguration>) -> Result<(), anyhow::Error> {
+fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, server_state: &Arc<ServerState>) -> Result<(), anyhow::Error> {
     stream.set_read_timeout(Some(Duration::new(1, 0)))?;
     println!("accepted new connection");
     println!("{:?}", storage);
@@ -79,7 +77,7 @@ fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, server_c
                     } else if command_name == "COMMAND" {
                         command = Some(Box::new(commands::Command {}))
                     } else if command_name == "INFO" {
-                        command = Some(Box::new(commands::Info { instructions: &received_message, server_configuration }))
+                        command = Some(Box::new(commands::Info { instructions: &received_message, server_state }))
                     }
                     if let Some(command) = command {
                         if let Some(reply) = command.execute(storage)? {
