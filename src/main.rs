@@ -22,12 +22,19 @@ fn main() -> Result<(), anyhow::Error> {
     let listener = TcpListener::bind(server_address)?;
     let redis_data: HashMap<String, StoredValue> = HashMap::new();
     let storage: Arc<Mutex<Storage>> = Arc::new(Mutex::new(Storage::new(redis_data)));
-    for incoming_connection in listener.incoming() {
-        let mut stream = incoming_connection?;
-        let per_thread_storage = Arc::clone(&storage);
+    {
+        let storage = Arc::clone(&storage);
         let server_state = Arc::clone(&server_state);
         thread::spawn(move || {
-            server_worker(&mut stream, &per_thread_storage, &server_state)
+            cluster_handler(&storage, &server_state)
+        });
+    }
+    for incoming_connection in listener.incoming() {
+        let mut stream = incoming_connection?;
+        let storage = Arc::clone(&storage);
+        let server_state = Arc::clone(&server_state);
+        thread::spawn(move || {
+            connection_handler(&mut stream, &storage, &server_state)
         });
     }
     Ok(())
@@ -54,10 +61,18 @@ fn get_option_value(option_name: &str, args: &[String]) -> Option<String> {
     option_value
 }
 
-fn server_worker(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, server_state: &Arc<ServerState>) -> Result<(), anyhow::Error> {
+fn cluster_handler(storage: &Arc<Mutex<Storage>>, server_state: &Arc<ServerState>) -> Result<(), anyhow::Error> {
+    if let Some(replica_of_address) = server_state.get_replica_of_address()? {
+        let mut stream = TcpStream::connect(replica_of_address)?;
+        let ping = protocol::array(vec![protocol::bulk_string("PING")]);
+        stream.write_all(&ping.serialize())?;
+    }
+    Ok(())
+}
+
+fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, server_state: &Arc<ServerState>) -> Result<(), anyhow::Error> {
     stream.set_read_timeout(Some(Duration::new(1, 0)))?;
-    println!("accepted new connection");
-    println!("{:?}", storage);
+    //println!("accepted new connection");
     loop {
         if let Some(received_message) = io::read_message(stream)? {
             println!("Received: {}", String::from_utf8_lossy(&received_message.serialize()));

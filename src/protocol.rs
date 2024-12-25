@@ -129,6 +129,10 @@ pub fn bulk_string(value: &str) -> DataType {
     }
 }
 
+pub fn array(elements: Vec<DataType>) -> DataType {
+    DataType::Array { elements }
+}
+
 //TODO: Implement the rest of the constructors
 /*
     BigNumber {
@@ -155,9 +159,6 @@ pub fn bulk_string(value: &str) -> DataType {
         entries: Vec<(DataType, DataType)>
     },
     Set {
-        elements: Vec<DataType>
-    },
-    Array {
         elements: Vec<DataType>
     },
     Push {
@@ -188,9 +189,6 @@ pub(crate) fn map(value: f64) -> DataType {
 }
 
 pub(crate) fn set(value: f64) -> DataType {
-}
-
-pub(crate) fn array(value: f64) -> DataType {
 }
 
 pub(crate) fn push(value: f64) -> DataType {

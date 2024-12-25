@@ -1,4 +1,5 @@
 use rand::Rng;
+use crate::error::RedisError;
 
 pub struct ServerState {
     pub replica_of: Option<String>,
@@ -9,6 +10,23 @@ pub struct ServerState {
 impl ServerState {
 
     const REPLICATION_ID_LENGTH: usize = 20;
+
+    pub fn get_replica_of_address(&self) -> Result<Option<String>, anyhow::Error> {
+        match &self.replica_of {
+            Some(replica_of) => {
+                let error = RedisError { 
+                    message: format!("Cannot parse replica_of {}", replica_of)
+                };
+                let mut replica_of_parts = replica_of.split(" ");
+                let host = replica_of_parts.next().ok_or::<anyhow::Error>(error.clone().into())?;
+                let port = replica_of_parts.next().ok_or::<anyhow::Error>(error.clone().into())?;
+                Ok(Some(format!("{}:{}", host, port)))
+            },
+            None => {
+                Ok(None)
+            }
+        }
+    }
 
     fn generate_replication_id() -> String {
         let mut generator = rand::thread_rng();
