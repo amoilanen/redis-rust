@@ -2,6 +2,7 @@ use rand::Rng;
 use crate::error::RedisError;
 
 pub struct ServerState {
+    pub port: usize,
     pub replica_of: Option<String>,
     pub master_replication_id: Option<String>,
     pub master_replication_offset: Option<usize>
@@ -35,16 +36,18 @@ impl ServerState {
         formatted_bytes
     }
 
-    pub fn new(replica_of: Option<String>) -> ServerState {
+    pub fn new(replica_of: Option<String>, port: usize) -> ServerState {
         match replica_of {
             Some(replica_of) =>
                 ServerState {
+                    port,
                     replica_of: Some(replica_of),
                     master_replication_id: None,
                     master_replication_offset: None
                 },
             None =>
                 ServerState {
+                    port,
                     replica_of: None,
                     master_replication_id: Some(ServerState::generate_replication_id()),
                     master_replication_offset: Some(0)

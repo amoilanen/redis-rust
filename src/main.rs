@@ -1,3 +1,4 @@
+use anyhow::{ensure, anyhow};
 use std::env;
 use std::{io::Write, net::{TcpListener, TcpStream}};
 use std::collections::HashMap;
@@ -17,7 +18,7 @@ fn main() -> Result<(), anyhow::Error> {
     //let args: Vec<String> = vec!["", "", "--port", "6380", "--replicaof", "'localhost 6379'"].iter().map(|x| x.to_string()).collect();
     let port = get_port(&args)?.unwrap_or(DEFAULT_PORT);
     let replica_of = get_replica_of(&args);
-    let server_state = Arc::new(ServerState::new(replica_of));
+    let server_state = Arc::new(ServerState::new(replica_of, port));
     let server_address = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(server_address)?;
     let redis_data: HashMap<String, StoredValue> = HashMap::new();
@@ -64,8 +65,26 @@ fn get_option_value(option_name: &str, args: &[String]) -> Option<String> {
 fn cluster_handler(storage: &Arc<Mutex<Storage>>, server_state: &Arc<ServerState>) -> Result<(), anyhow::Error> {
     if let Some(replica_of_address) = server_state.get_replica_of_address()? {
         let mut stream = TcpStream::connect(replica_of_address)?;
+        stream.set_read_timeout(Some(Duration::new(5, 0)))?;
         let ping = protocol::array(vec![protocol::bulk_string("PING")]);
         stream.write_all(&ping.serialize())?;
+        if let Some(pong) = io::read_message(&mut stream)? {
+            ensure!(pong.as_string()? == "PONG".to_owned(), "Should receive PONG from the master node")
+        } else {
+            Err(anyhow!("Should receive PONG from the master node"))?
+        }
+        let port_replconf = protocol::array(vec![
+            protocol::bulk_string("REPLCONF"),
+            protocol::bulk_string("listening-port"),
+            protocol::bulk_string(&server_state.port.to_string())
+        ]);
+        stream.write_all(&port_replconf.serialize())?;
+        let capa_replconf = protocol::array(vec![
+            protocol::bulk_string("REPLCONF"),
+            protocol::bulk_string("capa"),
+            protocol::bulk_string("psync2")
+        ]);
+        stream.write_all(&capa_replconf.serialize())?;
     }
     Ok(())
 }
