@@ -133,3 +133,15 @@ impl RedisCommand for Info<'_> {
         Ok(reply)
     }
 }
+
+pub struct ReplConf<'a> {
+    pub instructions: &'a protocol::DataType,
+    pub server_state: &'a server_state::ServerState
+}
+
+impl RedisCommand for ReplConf<'_> {
+    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+        //TODO: Implement
+        Ok(Some(protocol::bulk_string("OK")))
+    }
+}

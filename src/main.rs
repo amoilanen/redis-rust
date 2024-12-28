@@ -79,12 +79,22 @@ fn cluster_handler(storage: &Arc<Mutex<Storage>>, server_state: &Arc<ServerState
             protocol::bulk_string(&server_state.port.to_string())
         ]);
         stream.write_all(&port_replconf.serialize())?;
+        if let Some(ok) = io::read_message(&mut stream)? {
+            ensure!(ok.as_string()? == "OK".to_owned(), "Should receive OK from the master node")
+        } else {
+            Err(anyhow!("Should receive OK from the master node"))?
+        }
         let capa_replconf = protocol::array(vec![
             protocol::bulk_string("REPLCONF"),
             protocol::bulk_string("capa"),
             protocol::bulk_string("psync2")
         ]);
         stream.write_all(&capa_replconf.serialize())?;
+        if let Some(ok) = io::read_message(&mut stream)? {
+            ensure!(ok.as_string()? == "OK".to_owned(), "Should receive OK from the master node")
+        } else {
+            Err(anyhow!("Should receive OK from the master node"))?
+        }
     }
     Ok(())
 }
@@ -112,6 +122,8 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                         command = Some(Box::new(commands::Command {}))
                     } else if command_name == "INFO" {
                         command = Some(Box::new(commands::Info { instructions: &received_message, server_state }))
+                    } else if command_name == "REPLCONF" {
+                        command = Some(Box::new(commands::ReplConf { instructions: &received_message, server_state }))
                     }
                     if let Some(command) = command {
                         if let Some(reply) = command.execute(storage)? {
