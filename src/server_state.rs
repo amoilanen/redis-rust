@@ -62,17 +62,18 @@ mod tests {
 
     #[test]
     fn should_set_replication_id_and_offset_for_master() {
-        let state = ServerState::new(None);
+        let state = ServerState::new(None, 1234);
         assert_eq!(state.replica_of, None);
+        assert_eq!(state.port, 1234);
         assert_eq!(state.master_replication_offset, Some(0));
-        println!("{:?}", state.master_replication_id);
         assert_eq!(state.master_replication_id.map(|x| x.len()).unwrap_or(0), 40);
     }
 
     #[test]
     fn should_set_replication_id_and_offset_for_slave() {
-        let state = ServerState::new(Some("localhost 6379".to_owned()));
+        let state = ServerState::new(Some("localhost 6379".to_owned()), 1234);
         assert_eq!(state.replica_of, Some("localhost 6379".to_owned()));
+        assert_eq!(state.port, 1234);
         assert_eq!(state.master_replication_offset, None);
         assert_eq!(state.master_replication_id, None);
     }

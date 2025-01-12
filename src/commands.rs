@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use anyhow::anyhow;
 use crate::error::RedisError;
 use crate::protocol;
 use crate::server_state;
@@ -142,6 +143,24 @@ pub struct ReplConf<'a> {
 impl RedisCommand for ReplConf<'_> {
     fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
         //TODO: Implement
+        //println!("Replying to ReplConf command");
         Ok(Some(protocol::bulk_string("OK")))
+    }
+}
+
+pub struct PSync<'a> {
+    pub instructions: &'a protocol::DataType,
+    pub server_state: &'a server_state::ServerState
+}
+
+impl RedisCommand for PSync<'_> {
+    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+        let instructions: Vec<String> = self.instructions.as_array()?;
+        let replication_id = instructions.get(1).ok_or(anyhow!("replication_id not defined in {:?}", instructions))?;
+        let offset: i64 = instructions.get(2).ok_or(anyhow!("offset is not defined in {:?}", instructions))?.parse()?;
+        println!("Master handling PSYNC: replication_id = {}, offset = {}", replication_id, offset);
+        //TODO: Implement
+        let replication_id = self.server_state.master_replication_id.clone().ok_or(anyhow!("replication_id is not defined on the master node"))?;
+        Ok(Some(protocol::simple_string(format!("FULLRESYNC {} 0", replication_id).as_str())))
     }
 }

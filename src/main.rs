@@ -35,6 +35,7 @@ fn main() -> Result<(), anyhow::Error> {
         let storage = Arc::clone(&storage);
         let server_state = Arc::clone(&server_state);
         thread::spawn(move || {
+            //TODO: Handle failing connection_handler, at least print to the console
             connection_handler(&mut stream, &storage, &server_state)
         });
     }
@@ -95,6 +96,21 @@ fn cluster_handler(storage: &Arc<Mutex<Storage>>, server_state: &Arc<ServerState
         } else {
             Err(anyhow!("Should receive OK from the master node"))?
         }
+        let psync = protocol::array(vec![
+            protocol::bulk_string("PSYNC"),
+            protocol::bulk_string("?"),
+            protocol::bulk_string("-1")
+        ]);
+        stream.write_all(&psync.serialize())?;
+        if let Some(psync_reply) = io::read_message(&mut stream)? {
+            let reply = psync_reply.as_string()?;
+            //println!("Received from server {}", reply);
+            let reply_parts: Vec<&str> = reply.split(" ").collect();
+            let replication_id = reply_parts.get(1).ok_or(anyhow!("Could not read replication_id from the server reply {:?}", reply))?;
+            println!("Received replication_id {} from the server", replication_id);
+        } else {
+            Err(anyhow!("Should receive reply to PSYNC from the master node"))?
+        }
     }
     Ok(())
 }
@@ -124,6 +140,8 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                         command = Some(Box::new(commands::Info { instructions: &received_message, server_state }))
                     } else if command_name == "REPLCONF" {
                         command = Some(Box::new(commands::ReplConf { instructions: &received_message, server_state }))
+                    } else if command_name == "PSYNC" {
+                        command = Some(Box::new(commands::PSync { instructions: &received_message, server_state }))
                     }
                     if let Some(command) = command {
                         if let Some(reply) = command.execute(storage)? {
