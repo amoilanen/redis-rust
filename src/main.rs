@@ -24,11 +24,12 @@ fn main() -> Result<(), anyhow::Error> {
     let redis_data: HashMap<String, StoredValue> = HashMap::new();
     let storage: Arc<Mutex<Storage>> = Arc::new(Mutex::new(Storage::new(redis_data)));
     {
-        let storage = Arc::clone(&storage);
         let server_state = Arc::clone(&server_state);
-        thread::spawn(move || {
-            cluster_handler(&storage, &server_state)
-        });
+        if let Some(replica_of_address) = server_state.get_replica_of_address()? {
+            thread::spawn(move || {
+                join_cluster(&replica_of_address, &server_state)
+            });
+        }
     }
     for incoming_connection in listener.incoming() {
         let mut stream = incoming_connection?;
@@ -63,54 +64,52 @@ fn get_option_value(option_name: &str, args: &[String]) -> Option<String> {
     option_value
 }
 
-fn cluster_handler(storage: &Arc<Mutex<Storage>>, server_state: &Arc<ServerState>) -> Result<(), anyhow::Error> {
-    if let Some(replica_of_address) = server_state.get_replica_of_address()? {
-        let mut stream = TcpStream::connect(replica_of_address)?;
-        stream.set_read_timeout(Some(Duration::new(5, 0)))?;
-        let ping = protocol::array(vec![protocol::bulk_string("PING")]);
-        stream.write_all(&ping.serialize())?;
-        if let Some(pong) = io::read_message(&mut stream)? {
-            ensure!(pong.as_string()? == "PONG".to_owned(), "Should receive PONG from the master node")
-        } else {
-            Err(anyhow!("Should receive PONG from the master node"))?
-        }
-        let port_replconf = protocol::array(vec![
-            protocol::bulk_string("REPLCONF"),
-            protocol::bulk_string("listening-port"),
-            protocol::bulk_string(&server_state.port.to_string())
-        ]);
-        stream.write_all(&port_replconf.serialize())?;
-        if let Some(ok) = io::read_message(&mut stream)? {
-            ensure!(ok.as_string()? == "OK".to_owned(), "Should receive OK from the master node")
-        } else {
-            Err(anyhow!("Should receive OK from the master node"))?
-        }
-        let capa_replconf = protocol::array(vec![
-            protocol::bulk_string("REPLCONF"),
-            protocol::bulk_string("capa"),
-            protocol::bulk_string("psync2")
-        ]);
-        stream.write_all(&capa_replconf.serialize())?;
-        if let Some(ok) = io::read_message(&mut stream)? {
-            ensure!(ok.as_string()? == "OK".to_owned(), "Should receive OK from the master node")
-        } else {
-            Err(anyhow!("Should receive OK from the master node"))?
-        }
-        let psync = protocol::array(vec![
-            protocol::bulk_string("PSYNC"),
-            protocol::bulk_string("?"),
-            protocol::bulk_string("-1")
-        ]);
-        stream.write_all(&psync.serialize())?;
-        if let Some(psync_reply) = io::read_message(&mut stream)? {
-            let reply = psync_reply.as_string()?;
-            //println!("Received from server {}", reply);
-            let reply_parts: Vec<&str> = reply.split(" ").collect();
-            let replication_id = reply_parts.get(1).ok_or(anyhow!("Could not read replication_id from the server reply {:?}", reply))?;
-            println!("Received replication_id {} from the server", replication_id);
-        } else {
-            Err(anyhow!("Should receive reply to PSYNC from the master node"))?
-        }
+fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>) -> Result<(), anyhow::Error> {
+    let mut stream = TcpStream::connect(replica_of_address)?;
+    stream.set_read_timeout(Some(Duration::new(5, 0)))?;
+    let ping = protocol::array(vec![protocol::bulk_string("PING")]);
+    stream.write_all(&ping.serialize())?;
+    if let Some(pong) = io::read_message(&mut stream)? {
+        ensure!(pong.as_string()? == "PONG".to_owned(), "Should receive PONG from the master node")
+    } else {
+        Err(anyhow!("Should receive PONG from the master node"))?
+    }
+    let port_replconf = protocol::array(vec![
+        protocol::bulk_string("REPLCONF"),
+        protocol::bulk_string("listening-port"),
+        protocol::bulk_string(&server_state.port.to_string())
+    ]);
+    stream.write_all(&port_replconf.serialize())?;
+    if let Some(ok) = io::read_message(&mut stream)? {
+        ensure!(ok.as_string()? == "OK".to_owned(), "Should receive OK from the master node")
+    } else {
+        Err(anyhow!("Should receive OK from the master node"))?
+    }
+    let capa_replconf = protocol::array(vec![
+        protocol::bulk_string("REPLCONF"),
+        protocol::bulk_string("capa"),
+        protocol::bulk_string("psync2")
+    ]);
+    stream.write_all(&capa_replconf.serialize())?;
+    if let Some(ok) = io::read_message(&mut stream)? {
+        ensure!(ok.as_string()? == "OK".to_owned(), "Should receive OK from the master node")
+    } else {
+        Err(anyhow!("Should receive OK from the master node"))?
+    }
+    let psync = protocol::array(vec![
+        protocol::bulk_string("PSYNC"),
+        protocol::bulk_string("?"),
+        protocol::bulk_string("-1")
+    ]);
+    stream.write_all(&psync.serialize())?;
+    if let Some(psync_reply) = io::read_message(&mut stream)? {
+        let reply = psync_reply.as_string()?;
+        //println!("Received from server {}", reply);
+        let reply_parts: Vec<&str> = reply.split(" ").collect();
+        let replication_id = reply_parts.get(1).ok_or(anyhow!("Could not read replication_id from the server reply {:?}", reply))?;
+        println!("Received replication_id {} from the server", replication_id);
+    } else {
+        Err(anyhow!("Should receive reply to PSYNC from the master node"))?
     }
     Ok(())
 }
