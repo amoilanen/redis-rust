@@ -42,3 +42,6 @@ pub(crate) fn read_bytes(stream: &mut TcpStream) -> Result<Option<Vec<u8>>, anyh
         Ok(Some(message_bytes))
     }
 }
+
+
+//TODO: Add tests

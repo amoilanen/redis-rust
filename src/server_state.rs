@@ -78,3 +78,4 @@ mod tests {
         assert_eq!(state.master_replication_id, None);
     }
 }
+

@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, PartialEq)]
 pub struct Storage {
-    data: HashMap<String, StoredValue>
+    pub data: HashMap<String, StoredValue>
 }
 
 impl Storage {
@@ -42,7 +42,7 @@ impl Storage {
 pub struct StoredValue {
     expires_in_ms: Option<u64>,
     last_modified_timestamp: u128,
-    value: Vec<u8>
+    pub value: Vec<u8>
 }
 
 impl StoredValue {
