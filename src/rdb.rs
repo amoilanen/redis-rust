@@ -1,12 +1,14 @@
-use std::io::{Read, Write};
-use anyhow::{anyhow, ensure, Error, Result };
+use std::io::{BufReader, Read, Write};
+use anyhow::{anyhow, ensure, Context, Error, Result };
 use std::collections::HashMap;
 use crc64::Crc64;
-use crate::storage::Storage;
+use crate::storage::{Storage, StoredValue};
 
 // This is not a complete RDB format implementation, but rather a truncated/simplified version of it:
 // only a single database, all values are assumed to be Strings, expiration information is not encoded
 // Format explanation https://github.com/sripathikrishnan/redis-rdb-tools/wiki/Redis-RDB-Dump-File-Format
+
+//TODO: Implement support of value expiration encoding
 
 pub fn to_rdb<W>(storage: &Storage, output: &mut W) -> Result<(), Error>
 where W: Write {
@@ -39,10 +41,61 @@ fn compute_checksum(bytes: &Vec<u8>) -> Result<u64, Error> {
 
 pub fn from_rdb<R>(input: R) -> Result<Storage, Error>
 where R: Read {
-    //TODO: Implement parsing
+    let mut values: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut rdb_bytes: Vec<u8> = Vec::new();
+    let mut reader = BufReader::new(input);
+    let mut header= [0; 9];
+    reader.read_exact(&mut header)?;
+    rdb_bytes.extend(&header);
+    ensure!(header.starts_with(b"REDIS"), "{:?} must start with {:?}", header, b"REDIS");
+
+    let mut db_selector = [0; 2];
+    reader.read_exact(&mut db_selector)?;
+    ensure!(db_selector == [0xFE, 0x00], "{:?} not supported db selector", db_selector);
+    rdb_bytes.extend(&db_selector);
+
+    let mut next_byte = [0; 1];
+    reader.read_exact(&mut next_byte)?;
+    while next_byte[0] == 0x00 {
+        let (key_length, key_length_bytes) = decode_length(&mut reader)?;
+        rdb_bytes.extend(&key_length_bytes);
+        let mut key = Vec::with_capacity(key_length);
+        reader.read_exact(&mut key)?;
+        rdb_bytes.extend(&key);
+
+        let (value_length, value_length_bytes) = decode_length(&mut reader)?;
+        rdb_bytes.extend(&value_length_bytes);
+        let mut value = Vec::with_capacity(value_length);
+        reader.read_exact(&mut value)?;
+        rdb_bytes.extend(&value);
+
+        values.insert(String::from_utf8(key)?, value);
+
+        reader.read_exact(&mut next_byte)?;
+        rdb_bytes.extend(&next_byte);
+    }
+    ensure!(next_byte == [0xFF], "{:?} is not an RDB end", next_byte);
+    rdb_bytes.extend(&next_byte);
+
+    let mut checksum = [0; 8];
+    reader.read_exact(&mut checksum)?;
+    verify_checksum(&rdb_bytes, u64::from_be_bytes(checksum))?;
+
+    let mut data: HashMap<String, StoredValue> = HashMap::new();
+    for (key, value) in values.into_iter() {
+        data.insert(key, StoredValue::from(value, None)?);
+    }
     Ok(Storage {
-        data: HashMap::new()
+        data
     })
+}
+
+fn verify_checksum(bytes: &[u8], checksum: u64) -> Result<(), Error> {
+    let mut checksum_calculator = Crc64::new();
+    checksum_calculator.write(bytes)?;
+    let computed = checksum_calculator.get();
+    ensure!(computed == checksum, "Expected checksum {}, instead got {}, RDB file is corrupted?", checksum, computed);
+    Ok(())
 }
 
 fn encode_length(len: usize) -> Vec<u8> {
@@ -60,23 +113,25 @@ fn encode_length(len: usize) -> Vec<u8> {
     len_encoding
 }
 
-fn decode_length(encoded: &[u8]) -> Result<usize, Error> {
-    let first_byte = encoded.get(0).ok_or(anyhow!("{:?} should have at least one byte", encoded))?;
-    let prefix = first_byte >> 6;
+fn decode_length<R: Read>(reader: &mut R) -> Result<(usize, Vec<u8>), Error> {
+    let mut first_byte = [0; 1];
+    reader.read_exact(&mut first_byte).context(format!("Could not read first length byte"))?;
+    let prefix = first_byte[0] >> 6;
 
     match prefix {
-        0b00 => Ok(*first_byte as usize),
+        0b00 => Ok((first_byte[0] as usize, first_byte.to_vec())),
         0b01 => {
-            let second_byte = encoded.get(1).ok_or(anyhow!("{:?} should have at least two bytes", encoded))?;
-            let len = ((first_byte & 0b00111111) as u16) << 8 | (*second_byte as u16);
-            Ok(len as usize)
+            let mut second_byte = [0; 1];
+            reader.read_exact(&mut second_byte).context(format!("Could not read second lenght byte"))?;
+            let len = ((first_byte[0] & 0b00111111) as u16) << 8 | (second_byte[0] as u16);
+            Ok((len as usize, vec![first_byte[0], second_byte[0]]))
         },
         0b10 => {
-            ensure!(encoded.len() >= 5, "encoded length must contain at least 5 bytes");
-            let len: [u8; 4] = encoded[1..5].try_into()?;
-            Ok(u32::from_be_bytes(len) as usize)
+            let mut encoded_length = [0; 4];
+            reader.read_exact(&mut encoded_length).context("encoded length must contain 4 bytes")?;
+            Ok((u32::from_be_bytes(encoded_length) as usize, vec![first_byte.to_vec(), encoded_length.to_vec()].concat()))
         }
-        0b11 => Err(anyhow!("Special encoding not implemented, failed to parse length {:?}", encoded)),
+        0b11 => Err(anyhow!("Special encoding not implemented, failed to parse length")),
         _ => unreachable!()
     }
 }

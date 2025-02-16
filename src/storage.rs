@@ -46,7 +46,7 @@ pub struct StoredValue {
 }
 
 impl StoredValue {
-    fn from(value: Vec<u8>, expires_in_ms: Option<u64>) -> Result<StoredValue, anyhow::Error> {
+    pub fn from(value: Vec<u8>, expires_in_ms: Option<u64>) -> Result<StoredValue, anyhow::Error> {
         Ok(StoredValue {
             expires_in_ms,
             last_modified_timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis(),
