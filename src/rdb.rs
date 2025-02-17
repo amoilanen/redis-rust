@@ -14,7 +14,7 @@ pub fn to_rdb<W>(storage: &Storage, output: &mut W) -> Result<(), Error>
 where W: Write {
     let mut result = Vec::new();
     //Header
-    let header = format!("REDIS0007\r\n");
+    let header = format!("REDIS0007");
     result.extend(header.as_bytes());
     //Database selector: first database 0x00
     result.extend(&[0xFE, 0x00]);
@@ -139,15 +139,42 @@ fn decode_length<R: Read>(reader: &mut R) -> Result<(usize, Vec<u8>), Error> {
 #[cfg(test)]
 mod tests {
 
-    //TODO: Test length encoding and decoding
+    use std::{collections::HashMap, io::Cursor};
+    use crate::storage::{Storage, StoredValue};
+
+    use super::{from_rdb, to_rdb};
 
     #[test]
     fn should_serialize_and_deserialize_empty_storage() {
-        //TODO:
+        let storage = Storage::new(HashMap::new());
+
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut writer = Cursor::new(&mut buffer);
+        to_rdb(&storage, &mut writer).unwrap();
+        
+        let mut reader = Cursor::new(&mut buffer);
+        let deserialized_storage = from_rdb(&mut reader).unwrap();
+
+        assert_eq!(storage, deserialized_storage);
     }
 
     #[test]
     fn should_serialize_and_deserialize_storage_containing_strings_and_numbers() {
-        //TODO:
+        let mut data: HashMap<String, StoredValue> = HashMap::new();
+        data.insert("key1".to_owned(), StoredValue::from(5u64.to_be_bytes().to_vec(), None).unwrap());
+        data.insert("key2".to_owned(), StoredValue::from("abcde".as_bytes().to_vec(), None).unwrap());
+        data.insert("key3".to_owned(), StoredValue::from(vec![0x01, 0x02, 0x03], None).unwrap());
+        let storage = Storage::new(data);
+
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut writer = Cursor::new(&mut buffer);
+        to_rdb(&storage, &mut writer).unwrap();
+        
+        let mut reader = Cursor::new(&mut buffer);
+        let deserialized_storage = from_rdb(&mut reader).unwrap();
+
+        assert_eq!(storage.to_pairs(), deserialized_storage.to_pairs());
     }
+
+    //TODO: Test length encoding and decoding
 }

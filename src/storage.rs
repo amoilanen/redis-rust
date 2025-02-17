@@ -13,6 +13,14 @@ impl Storage {
         }
     }
 
+    pub fn to_pairs(&self) -> HashMap<String, Vec<u8>> {
+        let mut result = HashMap::new();
+        for (key, value) in self.data.iter() {
+            result.insert(key.clone(), value.value.clone());
+        }
+        result
+    }
+
     pub fn set(&mut self, key: &str, value: Vec<u8>, expires_in_ms: Option<u64>) -> Result<Option<StoredValue>, anyhow::Error> {
         Ok(self.data.insert(key.to_owned(), StoredValue::from(value, expires_in_ms)?))
     }
