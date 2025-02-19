@@ -57,22 +57,24 @@ where R: Read {
     let mut next_byte = [0; 1];
     reader.read_exact(&mut next_byte)?;
     while next_byte[0] == 0x00 {
+        rdb_bytes.extend(&next_byte);
         let (key_length, key_length_bytes) = decode_length(&mut reader)?;
         rdb_bytes.extend(&key_length_bytes);
-        let mut key = Vec::with_capacity(key_length);
+        let mut key = vec![0; key_length];
         reader.read_exact(&mut key)?;
+        //println!("key_length = {}, key = {:?}", key_length, key);
         rdb_bytes.extend(&key);
 
         let (value_length, value_length_bytes) = decode_length(&mut reader)?;
         rdb_bytes.extend(&value_length_bytes);
-        let mut value = Vec::with_capacity(value_length);
+        let mut value = vec![0; value_length];
         reader.read_exact(&mut value)?;
+        //println!("value_length = {}, value = {:?}", value_length, value);
         rdb_bytes.extend(&value);
 
         values.insert(String::from_utf8(key)?, value);
 
         reader.read_exact(&mut next_byte)?;
-        rdb_bytes.extend(&next_byte);
     }
     ensure!(next_byte == [0xFF], "{:?} is not an RDB end", next_byte);
     rdb_bytes.extend(&next_byte);
@@ -142,7 +144,20 @@ mod tests {
     use std::{collections::HashMap, io::Cursor};
     use crate::storage::{Storage, StoredValue};
 
-    use super::{from_rdb, to_rdb};
+    use super::{from_rdb, to_rdb, encode_length, decode_length};
+
+    fn test_encode_decode(len: usize) {
+        let mut encoded = encode_length(len);
+        let mut cursor = Cursor::new(&mut encoded);
+        assert_eq!(decode_length(&mut cursor).unwrap(), (len, encoded))
+    }
+
+    #[test]
+    fn should_encode_and_decode_length() {
+        test_encode_decode(14);
+        test_encode_decode(1 << 10);
+        test_encode_decode(1 << 15);
+    }
 
     #[test]
     fn should_serialize_and_deserialize_empty_storage() {
@@ -175,6 +190,4 @@ mod tests {
 
         assert_eq!(storage.to_pairs(), deserialized_storage.to_pairs());
     }
-
-    //TODO: Test length encoding and decoding
 }
