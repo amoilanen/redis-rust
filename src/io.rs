@@ -22,7 +22,7 @@ fn read_next_bytes(stream: &mut TcpStream, buffer: &mut [u8]) -> usize {
     }
 }
 
-pub(crate) fn read_bytes(stream: &mut TcpStream) -> Result<Option<Vec<u8>>, anyhow::Error> {
+pub fn read_bytes(stream: &mut TcpStream) -> Result<Option<Vec<u8>>, anyhow::Error> {
     let mut buffer = [0u8; BUFFER_SIZE];
     let mut message_bytes: Vec<u8> = Vec::new();
     let mut total_read_bytes = 0;

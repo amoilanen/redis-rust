@@ -14,7 +14,7 @@ pub fn parse_command_name(received_message: &protocol::DataType) -> Result<Strin
 }
 
 pub trait RedisCommand {
-    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error>;
+    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error>;
 }
 
 pub struct Echo<'a> {
@@ -22,10 +22,10 @@ pub struct Echo<'a> {
 }
 
 impl RedisCommand for Echo<'_> {
-    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
-        let mut reply: Option<protocol::DataType> = None;
+    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
+        let mut reply: Vec<protocol::DataType> = Vec::new();
         if let Some(echo_argument) = self.argument {
-            reply = Some(echo_argument.clone());
+            reply = vec![echo_argument.clone()];
         }
         return Ok(reply);
     }
@@ -34,17 +34,17 @@ impl RedisCommand for Echo<'_> {
 pub struct Ping {}
 
 impl RedisCommand for Ping {
-    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
-        return Ok(Some(protocol::simple_string("PONG")));
+    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
+        return Ok(vec![protocol::simple_string("PONG")]);
     }
 }
 
 pub struct Command {}
 
 impl RedisCommand for Command {
-    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         //TODO: Should return the list of all the available commands and their documentation instead
-        return Ok(Some(protocol::simple_string("OK")));
+        return Ok(vec![protocol::simple_string("OK")]);
     }
 }
 
@@ -53,7 +53,7 @@ pub struct Set<'a> {
 }
 
 impl RedisCommand for Set<'_> {
-    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.instructions.as_array()?;
         let error = RedisError { 
             message: "Invalid SET command syntax".to_string()
@@ -74,7 +74,7 @@ impl RedisCommand for Set<'_> {
         println!("expiration_after = {:?}", expires_in_ms);
         let mut data = storage.lock().unwrap(); //TODO: Avoid unwrap
         data.set(key, value.as_bytes().to_vec(), expires_in_ms)?;
-        return Ok(Some(protocol::simple_string("OK")));
+        return Ok(vec![protocol::simple_string("OK")]);
     }
 }
 
@@ -83,7 +83,7 @@ pub struct Get<'a> {
 }
 
 impl RedisCommand for Get<'_> {
-    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.instructions.as_array()?;
         let error = RedisError { 
             message: "GET command should have one argument".to_string()
@@ -93,9 +93,9 @@ impl RedisCommand for Get<'_> {
         let mut data = storage.lock().unwrap(); //TODO: Avoid unwrap
         let reply = match data.get(key)? {
             Some(value) => 
-                Some(protocol::bulk_string_from_bytes(value.clone())),
+                vec![protocol::bulk_string_from_bytes(value.clone())],
             None =>
-                Some(protocol::bulk_string_empty())
+                vec![protocol::bulk_string_empty()]
         };
         Ok(reply)
     }
@@ -107,7 +107,7 @@ pub struct Info<'a> {
 }
 
 impl RedisCommand for Info<'_> {
-    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.instructions.as_array()?;
         let error = RedisError { 
             message: "INFO command should have one argument".to_string()
@@ -127,9 +127,9 @@ impl RedisCommand for Info<'_> {
                 ),
                 _ => "".to_owned()
             };
-            Some(protocol::bulk_string(&format!("# Replication\r\nrole:{}\r\n{}", role, additional_info)))
+            vec![protocol::bulk_string(&format!("# Replication\r\nrole:{}\r\n{}", role, additional_info))]
         } else {
-            Some(protocol::bulk_string_empty())
+            vec![protocol::bulk_string_empty()]
         };
         Ok(reply)
     }
@@ -141,10 +141,10 @@ pub struct ReplConf<'a> {
 }
 
 impl RedisCommand for ReplConf<'_> {
-    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         //TODO: Implement
         //println!("Replying to ReplConf command");
-        Ok(Some(protocol::bulk_string("OK")))
+        Ok(vec![protocol::bulk_string("OK")])
     }
 }
 
@@ -154,13 +154,19 @@ pub struct PSync<'a> {
 }
 
 impl RedisCommand for PSync<'_> {
-    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
+        let mut reply = Vec::new();
         let instructions: Vec<String> = self.instructions.as_array()?;
         let replication_id = instructions.get(1).ok_or(anyhow!("replication_id not defined in {:?}", instructions))?;
         let offset: i64 = instructions.get(2).ok_or(anyhow!("offset is not defined in {:?}", instructions))?.parse()?;
         println!("Master handling PSYNC: replication_id = {}, offset = {}", replication_id, offset);
-        //TODO: Implement
         let replication_id = self.server_state.master_replication_id.clone().ok_or(anyhow!("replication_id is not defined on the master node"))?;
-        Ok(Some(protocol::simple_string(format!("FULLRESYNC {} 0", replication_id).as_str())))
+        reply.push(protocol::simple_string(format!("FULLRESYNC {} 0", replication_id).as_str()));
+
+        let rdb_bytes = storage.lock().unwrap().to_rdb()?;
+        reply.push(protocol::DataType::Rdb {
+            value: rdb_bytes
+        });
+        Ok(reply)
     }
 }

@@ -111,6 +111,16 @@ fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>) -> Re
     } else {
         Err(anyhow!("Should receive reply to PSYNC from the master node"))?
     }
+    if let Some(rdb_bytes) = io::read_bytes(&mut stream)? {
+        let rdb = protocol::DataType::parse_rdb(&rdb_bytes)?;
+        let received_storage = match rdb {
+            protocol::DataType::Rdb { value } =>
+                Storage::from_rdb(&value),
+            _ =>
+                Err(anyhow!("Expected protocol::DataType::Rdb"))
+        }?;
+        println!("Received storage {:?}", received_storage);
+    }
     Ok(())
 }
 
@@ -143,8 +153,9 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                         command = Some(Box::new(commands::PSync { instructions: &received_message, server_state }))
                     }
                     if let Some(command) = command {
-                        if let Some(reply) = command.execute(storage)? {
-                            stream.write_all(&reply.serialize())?;
+                        let reply = command.execute(storage)?;
+                        for message in reply.into_iter() {
+                            stream.write_all(&message.serialize())?;
                         }
                     }
                 },

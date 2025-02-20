@@ -9,7 +9,6 @@ use crate::storage::{Storage, StoredValue};
 // Format explanation https://github.com/sripathikrishnan/redis-rdb-tools/wiki/Redis-RDB-Dump-File-Format
 
 //TODO: Implement support of value expiration encoding
-
 pub fn to_rdb<W>(storage: &Storage, output: &mut W) -> Result<(), Error>
 where W: Write {
     let mut result = Vec::new();
@@ -184,7 +183,7 @@ mod tests {
         let mut buffer: Vec<u8> = Vec::new();
         let mut writer = Cursor::new(&mut buffer);
         to_rdb(&storage, &mut writer).unwrap();
-        
+
         let mut reader = Cursor::new(&mut buffer);
         let deserialized_storage = from_rdb(&mut reader).unwrap();
 

@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{anyhow, ensure, Context};
 
 use crate::error::RedisError;
 
@@ -70,6 +70,9 @@ pub enum DataType {
     },
     BulkString {
         value: Option<Vec<u8>>
+    },
+    Rdb {
+        value: Vec<u8>
     },
     BulkError {
         value: Vec<u8>
@@ -248,6 +251,9 @@ impl DataType {
                     None => ()
                 }
             },
+            &DataType::Rdb { value } => {
+                result.extend(value.as_slice());
+            },
             &DataType::BulkError { value } => {
                 result.extend(value.as_slice());
             },
@@ -337,6 +343,12 @@ impl DataType {
                 }
                 result.extend("\r\n".as_bytes());
             },
+            &DataType::Rdb { value } => {
+                result.push(b'$');
+                result.extend(value.len().to_string().as_bytes());
+                result.extend("\r\n".as_bytes());
+                result.extend(value.as_slice());
+            },
             &DataType::BulkError { value } => {
                 result.push(b'!');
                 result.extend(value.len().to_string().as_bytes());
@@ -395,6 +407,19 @@ impl DataType {
             }
         }
         result
+    }
+
+    pub fn parse_rdb(input: &Vec<u8>) -> Result<DataType, anyhow::Error> {
+        let (parsed, position) = parse_bulk_string(&input, 0)?;
+        let (rdb, position) = match parsed {
+            DataType::BulkString { value } =>
+                Ok((DataType::Rdb {
+                    value: value.unwrap_or(Vec::new())
+                }, position - 2)),
+            _ => Err(anyhow!("Unexpectedly got not a BulkString"))
+        }?;
+        ensure!(position == input.len(), "Not all the RDB file content has been read");
+        Ok(rdb)
     }
 
     pub(crate) fn parse(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
