@@ -40,7 +40,7 @@ fn main() -> Result<(), anyhow::Error> {
         stream.set_read_timeout(Some(Duration::new(1, 0)))?;
         thread::spawn(move || {
             //TODO: Handle failing connection_handler, at least print to the console
-            connection_handler(&mut stream, &storage, &server_state)
+            connection_handler(&mut stream, &storage, &server_state, true)
         });
     }
     Ok(())
@@ -68,6 +68,7 @@ fn get_option_value(option_name: &str, args: &[String]) -> Option<String> {
 }
 
 fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>, storage: &Arc<Mutex<Storage>>) -> Result<(), anyhow::Error> {
+    //TODO: Extract the handshake with the server as a separate function
     let mut stream = TcpStream::connect(replica_of_address)?;
     stream.set_read_timeout(Some(Duration::new(5, 0)))?;
     let ping = protocol::array(vec![protocol::bulk_string("PING")]);
@@ -139,11 +140,12 @@ fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>, stora
     } else {
         println!("RDB file not received")
     }
-
+    println!("Replica listening for more commands from master in a loop...");
+    connection_handler(&mut stream, storage, server_state, false)?;
     Ok(())
 }
 
-fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, server_state: &Arc<ServerState>) -> Result<(), anyhow::Error> {
+fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, server_state: &Arc<ServerState>, should_reply: bool) -> Result<(), anyhow::Error> {
     stream.set_read_timeout(Some(Duration::new(1, 0)))?;
     //println!("accepted new connection");
     loop {
@@ -179,12 +181,14 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                     }
                     if let Some(command) = command {
                         let reply = command.execute(storage)?;
-                        for message in reply.into_iter() {
-                            //println!("Sending: {:?}", message);
-                            let message_bytes = &message.serialize();
-                            //println!("which serializes to {:?}", message_bytes);
-                            {
-                                stream.write_all(message_bytes)?;
+                        if should_reply {
+                            for message in reply.into_iter() {
+                                //println!("Sending: {:?}", message);
+                                let message_bytes = &message.serialize();
+                                //println!("which serializes to {:?}", message_bytes);
+                                {
+                                    stream.write_all(message_bytes)?;
+                                }
                             }
                         }
                         let should_propagate_to_replicas = server_state.is_master() && command.is_propagated_to_replicas();

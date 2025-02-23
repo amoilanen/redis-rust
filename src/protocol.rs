@@ -10,7 +10,7 @@ pub fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyh
         Ok(parsed)
     } else {
         Err(RedisError { 
-            message: format!("Could not parse '{}': symbols after position {} are left unconsumed, total symbols {}",
+            message: format!("Could not parse '{:?}': symbols after position {:?} are left unconsumed, total symbols {:?}",
                 String::from_utf8_lossy(&message_bytes.clone()),
                 position,
                 message_bytes.len()
