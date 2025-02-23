@@ -19,14 +19,14 @@ fn main() -> Result<(), anyhow::Error> {
     //let args: Vec<String> = vec!["", "", "--port", "6379"].iter().map(|x| x.to_string()).collect();
     let port = get_port(&args)?.unwrap_or(DEFAULT_PORT);
     let replica_of = get_replica_of(&args);
-    let server_state = Arc::new(ServerState::new(replica_of, port));
+    let shared_server_state = Arc::new(ServerState::new(replica_of, port));
     let server_address = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(server_address)?;
     let redis_data: HashMap<String, StoredValue> = HashMap::new();
     let storage: Arc<Mutex<Storage>> = Arc::new(Mutex::new(Storage::new(redis_data)));
     {
-        let server_state = Arc::clone(&server_state);
-        if let Some(replica_of_address) = server_state.get_replica_of_address()? {
+        let server_state = Arc::clone(&shared_server_state);
+        if let Some(replica_of_address) = shared_server_state.get_replica_of_address()? {
             let storage = Arc::clone(&storage);
             thread::spawn(move || {
                 join_cluster(&replica_of_address, &server_state, &storage).unwrap();
@@ -36,7 +36,8 @@ fn main() -> Result<(), anyhow::Error> {
     for incoming_connection in listener.incoming() {
         let mut stream = incoming_connection?;
         let storage = Arc::clone(&storage);
-        let server_state = Arc::clone(&server_state);
+        let server_state = Arc::clone(&shared_server_state);
+        stream.set_read_timeout(Some(Duration::new(1, 0)))?;
         thread::spawn(move || {
             //TODO: Handle failing connection_handler, at least print to the console
             connection_handler(&mut stream, &storage, &server_state)
@@ -168,7 +169,8 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                     } else if command_name == "REPLCONF" {
                         command = Some(Box::new(commands::ReplConf { instructions: &received_message, server_state }))
                     } else if command_name == "PSYNC" {
-                        command = Some(Box::new(commands::PSync { instructions: &received_message, server_state }))
+                        command = Some(Box::new(commands::PSync { instructions: &received_message, server_state }));
+                        server_state.replica_connections.lock().unwrap().push(stream.try_clone()?);
                     }
                     if let Some(command) = command {
                         let reply = command.execute(storage)?;
@@ -176,7 +178,9 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                             //println!("Sending: {:?}", message);
                             let message_bytes = &message.serialize();
                             //println!("which serializes to {:?}", message_bytes);
-                            stream.write_all(message_bytes)?;
+                            {
+                                stream.write_all(message_bytes)?;
+                            }
                         }
                     }
                 },
