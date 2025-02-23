@@ -16,6 +16,14 @@ impl ServerState {
 
     const REPLICATION_ID_LENGTH: usize = 20;
 
+    pub fn is_master(&self) -> bool {
+        self.replica_of.is_none()
+    }
+
+    pub fn is_replica(&self) -> bool {
+        !self.is_master()
+    }
+
     pub fn get_replica_of_address(&self) -> Result<Option<String>, anyhow::Error> {
         match &self.replica_of {
             Some(replica_of) => {

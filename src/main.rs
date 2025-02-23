@@ -147,7 +147,12 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
     stream.set_read_timeout(Some(Duration::new(1, 0)))?;
     //println!("accepted new connection");
     loop {
-        if let Some(received_message) = io::read_message(stream)? {
+        let mut received_message = None;
+        let received_message_bytes = io::read_bytes(stream)?;
+        if let Some(message_bytes) = received_message_bytes.clone() {
+            received_message = Some(protocol::read_message_from_bytes(&message_bytes)?);
+        }
+        if let Some(received_message) = received_message {
             println!("Received: {}", String::from_utf8_lossy(&received_message.serialize()));
             let command_name = commands::parse_command_name(&received_message)?;
             match &received_message {
@@ -180,6 +185,15 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                             //println!("which serializes to {:?}", message_bytes);
                             {
                                 stream.write_all(message_bytes)?;
+                            }
+                        }
+                        let should_propagate_to_replicas = server_state.is_master() && command.is_propagated_to_replicas();
+                        if let Some(message_bytes) = received_message_bytes {
+                            if should_propagate_to_replicas {
+                                let mut replica_streams = server_state.replica_connections.lock().unwrap();
+                                for replica_stream in replica_streams.iter_mut() {
+                                    replica_stream.write_all(&message_bytes)?
+                                }
                             }
                         }
                     }

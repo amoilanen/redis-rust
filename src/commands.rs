@@ -15,6 +15,7 @@ pub fn parse_command_name(received_message: &protocol::DataType) -> Result<Strin
 
 pub trait RedisCommand {
     fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error>;
+    fn is_propagated_to_replicas(&self) -> bool;
 }
 
 pub struct Echo<'a> {
@@ -29,6 +30,9 @@ impl RedisCommand for Echo<'_> {
         }
         return Ok(reply);
     }
+    fn is_propagated_to_replicas(&self) -> bool {
+        false
+    }
 }
 
 pub struct Ping {}
@@ -36,6 +40,9 @@ pub struct Ping {}
 impl RedisCommand for Ping {
     fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         return Ok(vec![protocol::simple_string("PONG")]);
+    }
+    fn is_propagated_to_replicas(&self) -> bool {
+        false
     }
 }
 
@@ -45,6 +52,9 @@ impl RedisCommand for Command {
     fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         //TODO: Should return the list of all the available commands and their documentation instead
         return Ok(vec![protocol::simple_string("OK")]);
+    }
+    fn is_propagated_to_replicas(&self) -> bool {
+        false
     }
 }
 
@@ -76,6 +86,9 @@ impl RedisCommand for Set<'_> {
         data.set(key, value.as_bytes().to_vec(), expires_in_ms)?;
         return Ok(vec![protocol::simple_string("OK")]);
     }
+    fn is_propagated_to_replicas(&self) -> bool {
+        true
+    }
 }
 
 pub struct Get<'a> {
@@ -98,6 +111,9 @@ impl RedisCommand for Get<'_> {
                 vec![protocol::bulk_string_empty()]
         };
         Ok(reply)
+    }
+    fn is_propagated_to_replicas(&self) -> bool {
+        false
     }
 }
 
@@ -133,6 +149,9 @@ impl RedisCommand for Info<'_> {
         };
         Ok(reply)
     }
+    fn is_propagated_to_replicas(&self) -> bool {
+        false
+    }
 }
 
 pub struct ReplConf<'a> {
@@ -145,6 +164,9 @@ impl RedisCommand for ReplConf<'_> {
         //TODO: Implement
         //println!("Replying to ReplConf command");
         Ok(vec![protocol::bulk_string("OK")])
+    }
+    fn is_propagated_to_replicas(&self) -> bool {
+        false
     }
 }
 
@@ -168,5 +190,8 @@ impl RedisCommand for PSync<'_> {
             value: rdb_bytes
         });
         Ok(reply)
+    }
+    fn is_propagated_to_replicas(&self) -> bool {
+        false
     }
 }
