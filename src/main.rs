@@ -16,6 +16,7 @@ fn main() -> Result<(), anyhow::Error> {
     const DEFAULT_PORT: usize = 6379;
     let args: Vec<String> = env::args().collect();
     //let args: Vec<String> = vec!["", "", "--port", "6380", "--replicaof", "'localhost 6379'"].iter().map(|x| x.to_string()).collect();
+    //let args: Vec<String> = vec!["", "", "--port", "6379"].iter().map(|x| x.to_string()).collect();
     let port = get_port(&args)?.unwrap_or(DEFAULT_PORT);
     let replica_of = get_replica_of(&args);
     let server_state = Arc::new(ServerState::new(replica_of, port));
@@ -26,8 +27,9 @@ fn main() -> Result<(), anyhow::Error> {
     {
         let server_state = Arc::clone(&server_state);
         if let Some(replica_of_address) = server_state.get_replica_of_address()? {
+            let storage = Arc::clone(&storage);
             thread::spawn(move || {
-                join_cluster(&replica_of_address, &server_state)
+                join_cluster(&replica_of_address, &server_state, &storage).unwrap();
             });
         }
     }
@@ -64,7 +66,7 @@ fn get_option_value(option_name: &str, args: &[String]) -> Option<String> {
     option_value
 }
 
-fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>) -> Result<(), anyhow::Error> {
+fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>, storage: &Arc<Mutex<Storage>>) -> Result<(), anyhow::Error> {
     let mut stream = TcpStream::connect(replica_of_address)?;
     stream.set_read_timeout(Some(Duration::new(5, 0)))?;
     let ping = protocol::array(vec![protocol::bulk_string("PING")]);
@@ -111,6 +113,13 @@ fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>) -> Re
     } else {
         Err(anyhow!("Should receive reply to PSYNC from the master node"))?
     }
+    /*
+    let mut rdb_bytes = io::read_bytes(&mut stream)?;
+    while rdb_bytes.is_none() {
+        println!("Not yet received RDB...");
+        rdb_bytes = io::read_bytes(&mut stream)?;
+    }
+    println!("Received RDB bytes {:?}", rdb_bytes);*/
     if let Some(rdb_bytes) = io::read_bytes(&mut stream)? {
         let rdb = protocol::DataType::parse_rdb(&rdb_bytes)?;
         let received_storage = match rdb {
@@ -119,8 +128,17 @@ fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>) -> Re
             _ =>
                 Err(anyhow!("Expected protocol::DataType::Rdb"))
         }?;
-        println!("Received storage {:?}", received_storage);
+        println!("Received storage {:?}", &received_storage);
+        {
+            let mut storage = storage.lock().unwrap();
+            for (key, value) in received_storage.data.into_iter() {
+                storage.data.insert(key, value);
+            }
+        }
+    } else {
+        println!("RDB file not received")
     }
+
     Ok(())
 }
 
@@ -155,7 +173,10 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                     if let Some(command) = command {
                         let reply = command.execute(storage)?;
                         for message in reply.into_iter() {
-                            stream.write_all(&message.serialize())?;
+                            //println!("Sending: {:?}", message);
+                            let message_bytes = &message.serialize();
+                            //println!("which serializes to {:?}", message_bytes);
+                            stream.write_all(message_bytes)?;
                         }
                     }
                 },

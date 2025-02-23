@@ -4,6 +4,8 @@ use crate::error::RedisError;
 
 pub fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyhow::Error> {
     let (parsed, position) = DataType::parse(&message_bytes, 0)?;
+    //println!("Read message bytes {:?}", message_bytes);
+    //println!("Parsed them as {:?}", parsed);
     if position == message_bytes.len() {
         Ok(parsed)
     } else {
@@ -410,16 +412,29 @@ impl DataType {
     }
 
     pub fn parse_rdb(input: &Vec<u8>) -> Result<DataType, anyhow::Error> {
-        let (parsed, position) = parse_bulk_string(&input, 0)?;
-        let (rdb, position) = match parsed {
-            DataType::BulkString { value } =>
-                Ok((DataType::Rdb {
-                    value: value.unwrap_or(Vec::new())
-                }, position - 2)),
-            _ => Err(anyhow!("Unexpectedly got not a BulkString"))
-        }?;
+        let error_message = format!("Invalid RDB '{}'", String::from_utf8_lossy(&input.clone()));
+        let mut position = 0;
+        read_and_assert_symbol(input, b'$', position).context(error_message.clone())?;
+        let length_start = position + 1;
+        let first_length_symbol = input.get(length_start);
+
+        let mut value: Vec<u8> = Vec::new();
+        if first_length_symbol != Some(&b'-') {
+            let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
+            let string_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
+            read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
+            read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
+            let value_start = length_end + 2;
+            let value_end = length_end + 2 + string_length;
+            value = input[value_start..value_end].to_vec();
+            position = value_end;
+        } else {
+            position ="$-1\r\n".len();
+        }
         ensure!(position == input.len(), "Not all the RDB file content has been read");
-        Ok(rdb)
+        Ok(DataType::Rdb {
+            value
+        })
     }
 
     pub(crate) fn parse(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
