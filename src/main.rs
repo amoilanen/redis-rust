@@ -106,6 +106,8 @@ fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>, stora
         protocol::bulk_string("-1")
     ]);
     stream.write_all(&psync.serialize())?;
+
+    //TODO #3: Move receiving the replication id (FULLRESYNC command) and also reading and processing the RDB to the main connection handling loop: "connection_handler"
     if let Some(psync_reply) = io::read_message(&mut stream)? {
         let reply = psync_reply.as_string()?;
         //println!("Received from server {}", reply);

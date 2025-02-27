@@ -2,6 +2,7 @@ use anyhow::{anyhow, ensure, Context};
 
 use crate::error::RedisError;
 
+//TODO #2: This might return multiple messages at one time, messages are not necessarily received one by one
 pub fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyhow::Error> {
     let (parsed, position) = DataType::parse(&message_bytes, 0)?;
     //println!("Read message bytes {:?}", message_bytes);
@@ -555,6 +556,7 @@ fn parse_simple_error(input: &Vec<u8>, position: usize) -> Result<(DataType, usi
     }, value_end + 2))
 }
 
+//TODO #1: This can be either a BulkString or RDB, if input ends abruptly without the ending \r\n or continues but not with \r\n it is an RDB file
 fn parse_bulk_string(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
     let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(&input.clone()));
     read_and_assert_symbol(input, b'$', position).context(error_message.clone())?;
