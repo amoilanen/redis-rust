@@ -2,6 +2,21 @@ use anyhow::{anyhow, ensure, Context};
 
 use crate::error::RedisError;
 
+pub fn read_messages_from_bytes(message_bytes: &Vec<u8>) -> Result<Vec<DataType>, anyhow::Error> {
+    let mut messages: Vec<DataType> = Vec::new();
+    let mut current_position = 0;
+    let total_length = message_bytes.len();
+
+    while current_position < total_length {
+        let (parsed, new_position) = DataType::parse(&message_bytes, current_position)?;
+        current_position = new_position;
+        messages.push(parsed);
+    }
+    //println!("Read message bytes {:?}", message_bytes);
+    //println!("Parsed them as {:?}", messages);
+    Ok(messages)
+}
+
 //TODO #2: This might return multiple messages at one time, messages are not necessarily received one by one
 pub fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyhow::Error> {
     let (parsed, position) = DataType::parse(&message_bytes, 0)?;
@@ -1067,5 +1082,21 @@ mod tests {
         let input = "a+5\r\n";
         let error = DataType::parse(&input.as_bytes().to_vec(), 0).unwrap_err();
         assert_eq!(format!("{}", error), format!("RedisError: Could not read the next data type value '{}' at position 0, unsupported prefix 'a'", input))
+    }
+
+    #[test]
+    fn should_read_message_from_bytes() {
+        let parsed_single_message = read_messages_from_bytes(&"$5\r\nHello\r\n".as_bytes().to_vec()).unwrap();
+        assert_eq!(parsed_single_message, vec![DataType::BulkString {
+            value: Some("Hello".as_bytes().to_vec())
+        }]);
+        let parsed_messages = read_messages_from_bytes(&"$1\r\na\r\n$2\r\nbc\r\n$3\r\ndef\r\n".as_bytes().to_vec()).unwrap();
+        assert_eq!(parsed_messages, vec![DataType::BulkString {
+            value: Some("a".as_bytes().to_vec())
+        }, DataType::BulkString {
+            value: Some("bc".as_bytes().to_vec())
+        }, DataType::BulkString {
+            value: Some("def".as_bytes().to_vec())
+        }]);
     }
 }
