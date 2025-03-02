@@ -34,6 +34,14 @@ fn read_and_assert_symbol(input: &Vec<u8>, symbol: u8, position: usize) -> Resul
     }
 }
 
+fn maybe_slice_of<T>(vec: &[T], start: usize, end: usize) -> Option<&[T]> {
+    if start > vec.len() || end > vec.len() || start > end {
+        None
+    } else {
+        Some(&vec[start..end])
+    }
+}
+
 fn find_position_before_terminator(input: &Vec<u8>, terminator: &Vec<u8>, position: usize) -> usize {
     let mut current = position;
     let mut end_index: Option<usize> = None;
@@ -412,32 +420,6 @@ impl DataType {
         result
     }
 
-    pub fn parse_rdb(input: &Vec<u8>) -> Result<DataType, anyhow::Error> {
-        let error_message = format!("Invalid RDB '{}'", String::from_utf8_lossy(&input.clone()));
-        let mut position = 0;
-        read_and_assert_symbol(input, b'$', position).context(error_message.clone())?;
-        let length_start = position + 1;
-        let first_length_symbol = input.get(length_start);
-
-        let mut value: Vec<u8> = Vec::new();
-        if first_length_symbol != Some(&b'-') {
-            let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
-            let string_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
-            read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
-            read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
-            let value_start = length_end + 2;
-            let value_end = length_end + 2 + string_length;
-            value = input[value_start..value_end].to_vec();
-            position = value_end;
-        } else {
-            position ="$-1\r\n".len();
-        }
-        ensure!(position == input.len(), "Not all the RDB file content has been read");
-        Ok(DataType::Rdb {
-            value
-        })
-    }
-
     pub(crate) fn parse(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
         if let Some(prefix_symbol) = input.get(position) {
             match prefix_symbol {
@@ -454,7 +436,7 @@ impl DataType {
                     parse_simple_error(input, position)
                 },
                 b'$' => {
-                    parse_bulk_string(input, position)
+                    parse_bulk_string_or_rdb(input, position)
                 },
                 b'!' => {
                     parse_bulk_error(input, position)
@@ -557,13 +539,12 @@ fn parse_simple_error(input: &Vec<u8>, position: usize) -> Result<(DataType, usi
 }
 
 //TODO #1: This can be either a BulkString or RDB, if input ends abruptly without the ending \r\n or continues but not with \r\n it is an RDB file
-fn parse_bulk_string(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
+fn parse_bulk_string_or_rdb(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
     let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(&input.clone()));
     read_and_assert_symbol(input, b'$', position).context(error_message.clone())?;
     let length_start = position + 1;
     let first_length_symbol = input.get(length_start);
 
-    let mut value: Option<Vec<u8>> = Some(Vec::new());
     let mut new_position = position ;
     if first_length_symbol != Some(&b'-') {
         let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
@@ -572,17 +553,24 @@ fn parse_bulk_string(input: &Vec<u8>, position: usize) -> Result<(DataType, usiz
         read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
         let value_start = length_end + 2;
         let value_end = length_end + 2 + string_length;
-        read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
-        read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-        value = Some(input[value_start..value_end].to_vec());
-        new_position = value_end + 2;
+
+        let maybe_bulk_string_end = maybe_slice_of(input, value_end, value_end + 2);
+        if maybe_bulk_string_end == Some("\r\n".as_bytes()) {
+            new_position = value_end + 2;
+            Ok((DataType::BulkString {
+                value: Some(input[value_start..value_end].to_vec())
+            }, new_position))
+        } else {
+            Ok((DataType::Rdb {
+                value: input[value_start..value_end].to_vec()
+            }, value_end))
+        }
     } else {
-        value = None;
         new_position = new_position + "$-1\r\n".len();
+        Ok((DataType::BulkString {
+            value: None
+        }, new_position))
     }
-    Ok((DataType::BulkString {
-        value
-    }, new_position))
 }
 
 fn parse_bulk_error(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
@@ -995,6 +983,16 @@ mod tests {
         assert_eq!(DataType::parse(&"$0\r\n\r\n".as_bytes().to_vec(), 0).unwrap(), (DataType::BulkString {
             value: Some(Vec::new())
         }, 6));
+    }
+
+    #[test]
+    fn should_parse_rdb() {
+        assert_eq!(DataType::parse(&"$8\r\nfake_rdb".as_bytes().to_vec(), 0).unwrap(), (DataType::Rdb {
+            value: "fake_rdb".as_bytes().to_vec()
+        }, 12));
+        assert_eq!(DataType::parse(&"$9\r\nfake\r\nrdb".as_bytes().to_vec(), 0).unwrap(), (DataType::Rdb {
+            value: "fake\r\nrdb".as_bytes().to_vec()
+        }, 13));
     }
 
     #[test]

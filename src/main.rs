@@ -125,7 +125,7 @@ fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>, stora
     }
     println!("Received RDB bytes {:?}", rdb_bytes);*/
     if let Some(rdb_bytes) = io::read_bytes(&mut stream)? {
-        let rdb = protocol::DataType::parse_rdb(&rdb_bytes)?;
+        let rdb = protocol::read_message_from_bytes(&rdb_bytes)?;
         let received_storage = match rdb {
             protocol::DataType::Rdb { value } =>
                 Storage::from_rdb(&value),
