@@ -12,16 +12,16 @@ pub fn read_messages_from_bytes(message_bytes: &Vec<u8>) -> Result<Vec<DataType>
         current_position = new_position;
         messages.push(parsed);
     }
-    //println!("Read message bytes {:?}", message_bytes);
-    //println!("Parsed them as {:?}", messages);
+    println!("Read messages bytes {:?}", message_bytes);
+    println!("Parsed them as messages {:?}", messages);
     Ok(messages)
 }
 
 //TODO #2: This might return multiple messages at one time, messages are not necessarily received one by one
 pub fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyhow::Error> {
     let (parsed, position) = DataType::parse(&message_bytes, 0)?;
-    //println!("Read message bytes {:?}", message_bytes);
-    //println!("Parsed them as {:?}", parsed);
+    println!("Read message bytes {:?}", message_bytes);
+    println!("Parsed them as {:?}", parsed);
     if position == message_bytes.len() {
         Ok(parsed)
     } else {

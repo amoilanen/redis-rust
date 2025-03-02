@@ -107,41 +107,6 @@ fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>, stora
     ]);
     stream.write_all(&psync.serialize())?;
 
-    //TODO #3: Move receiving the replication id (FULLRESYNC command) and also reading and processing the RDB to the main connection handling loop: "connection_handler"
-    if let Some(psync_reply) = io::read_single_message(&mut stream)? {
-        let reply = psync_reply.as_string()?;
-        //println!("Received from server {}", reply);
-        let reply_parts: Vec<&str> = reply.split(" ").collect();
-        let replication_id = reply_parts.get(1).ok_or(anyhow!("Could not read replication_id from the server reply {:?}", reply))?;
-        println!("Received replication_id {} from the server", replication_id);
-    } else {
-        Err(anyhow!("Should receive reply to PSYNC from the master node"))?
-    }
-    /*
-    let mut rdb_bytes = io::read_bytes(&mut stream)?;
-    while rdb_bytes.is_none() {
-        println!("Not yet received RDB...");
-        rdb_bytes = io::read_bytes(&mut stream)?;
-    }
-    println!("Received RDB bytes {:?}", rdb_bytes);*/
-    if let Some(rdb_bytes) = io::read_bytes(&mut stream)? {
-        let rdb = protocol::read_message_from_bytes(&rdb_bytes)?;
-        let received_storage = match rdb {
-            protocol::DataType::Rdb { value } =>
-                Storage::from_rdb(&value),
-            _ =>
-                Err(anyhow!("Expected protocol::DataType::Rdb"))
-        }?;
-        println!("Received storage {:?}", &received_storage);
-        {
-            let mut storage = storage.lock().unwrap();
-            for (key, value) in received_storage.data.into_iter() {
-                storage.data.insert(key, value);
-            }
-        }
-    } else {
-        println!("RDB file not received")
-    }
     println!("Replica listening for more commands from master in a loop...");
     connection_handler(&mut stream, storage, server_state, false)?;
     Ok(())
@@ -181,9 +146,9 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                         let reply = command.execute(storage)?;
                         if should_reply {
                             for message in reply.into_iter() {
-                                //println!("Sending: {:?}", message);
+                                println!("Sending: {:?}", message);
                                 let message_bytes = &message.serialize();
-                                //println!("which serializes to {:?}", message_bytes);
+                                println!("which serializes to {:?}", message_bytes);
                                 {
                                     stream.write_all(message_bytes)?;
                                 }
@@ -194,9 +159,28 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                             let command_bytes = command.serialize();
                             let mut replica_streams = server_state.replica_connections.lock().unwrap();
                             for replica_stream in replica_streams.iter_mut() {
+                                println!("Propagating command to replica: {:?}", &command_bytes);
                                 replica_stream.write_all(&command_bytes)?
                             }
                         }
+                    }
+                },
+                protocol::DataType::Rdb { value } => {
+                    let maybe_received_storage = Storage::from_rdb(&value).ok();
+                    println!("Received storage {:?}", &maybe_received_storage);
+                    if let Some(received_storage) = maybe_received_storage {
+                        let mut storage = storage.lock().unwrap();
+                        for (key, value) in received_storage.data.into_iter() {
+                            storage.data.insert(key, value);
+                        }
+                    }
+                },
+                protocol::DataType::SimpleString { value } => {
+                    let string_content = received_message.as_string()?;
+                    if string_content.starts_with("FULLRESYNC") {
+                        let reply_parts: Vec<&str> = string_content.split(" ").collect();
+                        let replication_id = reply_parts.get(1).ok_or(anyhow!("Could not read replication_id from the server FULLRESYNC reply {:?}", string_content))?;
+                        println!("Received replication_id {} from the server", replication_id);
                     }
                 },
                 _ => ()
