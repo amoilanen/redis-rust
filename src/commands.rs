@@ -16,9 +16,11 @@ pub fn parse_command_name(received_message: &protocol::DataType) -> Result<Strin
 pub trait RedisCommand {
     fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error>;
     fn is_propagated_to_replicas(&self) -> bool;
+    fn serialize(&self) -> Vec<u8>;
 }
 
 pub struct Echo<'a> {
+    pub message: &'a protocol::DataType,
     pub argument: Option<&'a protocol::DataType>
 }
 
@@ -33,22 +35,32 @@ impl RedisCommand for Echo<'_> {
     fn is_propagated_to_replicas(&self) -> bool {
         false
     }
+    fn serialize(&self) -> Vec<u8> {
+        self.message.serialize()
+    }
 }
 
-pub struct Ping {}
+pub struct Ping<'a> {
+    pub message: &'a protocol::DataType,
+}
 
-impl RedisCommand for Ping {
+impl RedisCommand for Ping<'_> {
     fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         return Ok(vec![protocol::simple_string("PONG")]);
     }
     fn is_propagated_to_replicas(&self) -> bool {
         false
     }
+    fn serialize(&self) -> Vec<u8> {
+        self.message.serialize()
+    }
 }
 
-pub struct Command {}
+pub struct Command<'a> {
+    pub message: &'a protocol::DataType,
+}
 
-impl RedisCommand for Command {
+impl RedisCommand for Command<'_> {
     fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         //TODO: Should return the list of all the available commands and their documentation instead
         return Ok(vec![protocol::simple_string("OK")]);
@@ -56,15 +68,18 @@ impl RedisCommand for Command {
     fn is_propagated_to_replicas(&self) -> bool {
         false
     }
+    fn serialize(&self) -> Vec<u8> {
+        self.message.serialize()
+    }
 }
 
 pub struct Set<'a> {
-    pub instructions: &'a protocol::DataType
+    pub message: &'a protocol::DataType
 }
 
 impl RedisCommand for Set<'_> {
     fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
-        let instructions: Vec<String> = self.instructions.as_array()?;
+        let instructions: Vec<String> = self.message.as_array()?;
         let error = RedisError { 
             message: "Invalid SET command syntax".to_string()
         };
@@ -89,15 +104,18 @@ impl RedisCommand for Set<'_> {
     fn is_propagated_to_replicas(&self) -> bool {
         true
     }
+    fn serialize(&self) -> Vec<u8> {
+        self.message.serialize()
+    }
 }
 
 pub struct Get<'a> {
-    pub instructions: &'a protocol::DataType
+    pub message: &'a protocol::DataType
 }
 
 impl RedisCommand for Get<'_> {
     fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
-        let instructions: Vec<String> = self.instructions.as_array()?;
+        let instructions: Vec<String> = self.message.as_array()?;
         let error = RedisError { 
             message: "GET command should have one argument".to_string()
         };
@@ -115,16 +133,19 @@ impl RedisCommand for Get<'_> {
     fn is_propagated_to_replicas(&self) -> bool {
         false
     }
+    fn serialize(&self) -> Vec<u8> {
+        self.message.serialize()
+    }
 }
 
 pub struct Info<'a> {
-    pub instructions: &'a protocol::DataType,
+    pub message: &'a protocol::DataType,
     pub server_state: &'a server_state::ServerState
 }
 
 impl RedisCommand for Info<'_> {
     fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
-        let instructions: Vec<String> = self.instructions.as_array()?;
+        let instructions: Vec<String> = self.message.as_array()?;
         let error = RedisError { 
             message: "INFO command should have one argument".to_string()
         };
@@ -152,10 +173,13 @@ impl RedisCommand for Info<'_> {
     fn is_propagated_to_replicas(&self) -> bool {
         false
     }
+    fn serialize(&self) -> Vec<u8> {
+        self.message.serialize()
+    }
 }
 
 pub struct ReplConf<'a> {
-    pub instructions: &'a protocol::DataType,
+    pub message: &'a protocol::DataType,
     pub server_state: &'a server_state::ServerState
 }
 
@@ -168,17 +192,20 @@ impl RedisCommand for ReplConf<'_> {
     fn is_propagated_to_replicas(&self) -> bool {
         false
     }
+    fn serialize(&self) -> Vec<u8> {
+        self.message.serialize()
+    }
 }
 
 pub struct PSync<'a> {
-    pub instructions: &'a protocol::DataType,
+    pub message: &'a protocol::DataType,
     pub server_state: &'a server_state::ServerState
 }
 
 impl RedisCommand for PSync<'_> {
     fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let mut reply = Vec::new();
-        let instructions: Vec<String> = self.instructions.as_array()?;
+        let instructions: Vec<String> = self.message.as_array()?;
         let replication_id = instructions.get(1).ok_or(anyhow!("replication_id not defined in {:?}", instructions))?;
         let offset: i64 = instructions.get(2).ok_or(anyhow!("offset is not defined in {:?}", instructions))?.parse()?;
         println!("Master handling PSYNC: replication_id = {}, offset = {}", replication_id, offset);
@@ -193,5 +220,8 @@ impl RedisCommand for PSync<'_> {
     }
     fn is_propagated_to_replicas(&self) -> bool {
         false
+    }
+    fn serialize(&self) -> Vec<u8> {
+        self.message.serialize()
     }
 }

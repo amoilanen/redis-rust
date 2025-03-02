@@ -7,7 +7,7 @@ use std::thread;
 use std::sync::{Arc, Mutex};
 
 use redis_starter_rust::storage::{ Storage, StoredValue };
-use redis_starter_rust::protocol;
+use redis_starter_rust::protocol::{self, DataType};
 use redis_starter_rust::io;
 use redis_starter_rust::commands::{ self, RedisCommand };
 use redis_starter_rust::server_state::ServerState;
@@ -73,7 +73,7 @@ fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>, stora
     stream.set_read_timeout(Some(Duration::new(5, 0)))?;
     let ping = protocol::array(vec![protocol::bulk_string("PING")]);
     stream.write_all(&ping.serialize())?;
-    if let Some(pong) = io::read_message(&mut stream)? {
+    if let Some(pong) = io::read_single_message(&mut stream)? {
         ensure!(pong.as_string()? == "PONG".to_owned(), "Should receive PONG from the master node")
     } else {
         Err(anyhow!("Should receive PONG from the master node"))?
@@ -84,7 +84,7 @@ fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>, stora
         protocol::bulk_string(&server_state.port.to_string())
     ]);
     stream.write_all(&port_replconf.serialize())?;
-    if let Some(ok) = io::read_message(&mut stream)? {
+    if let Some(ok) = io::read_single_message(&mut stream)? {
         ensure!(ok.as_string()? == "OK".to_owned(), "Should receive OK from the master node")
     } else {
         Err(anyhow!("Should receive OK from the master node"))?
@@ -95,7 +95,7 @@ fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>, stora
         protocol::bulk_string("psync2")
     ]);
     stream.write_all(&capa_replconf.serialize())?;
-    if let Some(ok) = io::read_message(&mut stream)? {
+    if let Some(ok) = io::read_single_message(&mut stream)? {
         ensure!(ok.as_string()? == "OK".to_owned(), "Should receive OK from the master node")
     } else {
         Err(anyhow!("Should receive OK from the master node"))?
@@ -108,7 +108,7 @@ fn join_cluster(replica_of_address: &str, server_state: &Arc<ServerState>, stora
     stream.write_all(&psync.serialize())?;
 
     //TODO #3: Move receiving the replication id (FULLRESYNC command) and also reading and processing the RDB to the main connection handling loop: "connection_handler"
-    if let Some(psync_reply) = io::read_message(&mut stream)? {
+    if let Some(psync_reply) = io::read_single_message(&mut stream)? {
         let reply = psync_reply.as_string()?;
         //println!("Received from server {}", reply);
         let reply_parts: Vec<&str> = reply.split(" ").collect();
@@ -151,34 +151,30 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
     stream.set_read_timeout(Some(Duration::new(1, 0)))?;
     //println!("accepted new connection");
     loop {
-        let mut received_message = None;
-        let received_message_bytes = io::read_bytes(stream)?;
-        if let Some(message_bytes) = received_message_bytes.clone() {
-            received_message = Some(protocol::read_message_from_bytes(&message_bytes)?);
-        }
-        if let Some(received_message) = received_message {
+        let received_messages: Vec<DataType> = io::read_messages(stream)?;
+        for received_message in received_messages.into_iter() {
             println!("Received: {}", String::from_utf8_lossy(&received_message.serialize()));
-            let command_name = commands::parse_command_name(&received_message)?;
             match &received_message {
                 protocol::DataType::Array { elements } => {
+                    let command_name: String = commands::parse_command_name(&received_message)?;
                     let mut command: Option<Box<dyn RedisCommand>> = None;
                     let command_name = command_name.as_str();
                     if command_name == "ECHO" {
-                        command = Some(Box::new(commands::Echo { argument: elements.get(1) }));
+                        command = Some(Box::new(commands::Echo { message: &received_message, argument: elements.get(1) }));
                     } else if command_name == "PING" {
-                        command = Some(Box::new(commands::Ping {}));
+                        command = Some(Box::new(commands::Ping { message: &received_message }));
                     } else if command_name == "SET" {
-                        command = Some(Box::new(commands::Set { instructions: &received_message }));
+                        command = Some(Box::new(commands::Set { message: &received_message }));
                     } else if command_name == "GET" {
-                        command = Some(Box::new(commands::Get { instructions: &received_message }));
+                        command = Some(Box::new(commands::Get { message: &received_message }));
                     } else if command_name == "COMMAND" {
-                        command = Some(Box::new(commands::Command {}))
+                        command = Some(Box::new(commands::Command { message: &received_message }))
                     } else if command_name == "INFO" {
-                        command = Some(Box::new(commands::Info { instructions: &received_message, server_state }))
+                        command = Some(Box::new(commands::Info { message: &received_message, server_state }))
                     } else if command_name == "REPLCONF" {
-                        command = Some(Box::new(commands::ReplConf { instructions: &received_message, server_state }))
+                        command = Some(Box::new(commands::ReplConf { message: &received_message, server_state }))
                     } else if command_name == "PSYNC" {
-                        command = Some(Box::new(commands::PSync { instructions: &received_message, server_state }));
+                        command = Some(Box::new(commands::PSync { message: &received_message, server_state }));
                         server_state.replica_connections.lock().unwrap().push(stream.try_clone()?);
                     }
                     if let Some(command) = command {
@@ -194,20 +190,17 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                             }
                         }
                         let should_propagate_to_replicas = server_state.is_master() && command.is_propagated_to_replicas();
-                        if let Some(message_bytes) = received_message_bytes {
-                            if should_propagate_to_replicas {
-                                let mut replica_streams = server_state.replica_connections.lock().unwrap();
-                                for replica_stream in replica_streams.iter_mut() {
-                                    replica_stream.write_all(&message_bytes)?
-                                }
+                        if should_propagate_to_replicas {
+                            let command_bytes = command.serialize();
+                            let mut replica_streams = server_state.replica_connections.lock().unwrap();
+                            for replica_stream in replica_streams.iter_mut() {
+                                replica_stream.write_all(&command_bytes)?
                             }
                         }
                     }
                 },
                 _ => ()
             }
-        } else {
-            //println!("No message has been read")
         }
         //TODO: Terminate the connection when requested by the client
     }
