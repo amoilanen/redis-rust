@@ -1,4 +1,4 @@
-use anyhow::{anyhow, ensure, Context};
+use anyhow::Context;
 
 use crate::error::RedisError;
 
@@ -17,7 +17,6 @@ pub fn read_messages_from_bytes(message_bytes: &Vec<u8>) -> Result<Vec<DataType>
     Ok(messages)
 }
 
-//TODO #2: This might return multiple messages at one time, messages are not necessarily received one by one
 pub fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyhow::Error> {
     let (parsed, position) = DataType::parse(&message_bytes, 0)?;
     println!("Read message bytes {:?}", message_bytes);
@@ -283,7 +282,7 @@ impl DataType {
             &DataType::BulkError { value } => {
                 result.extend(value.as_slice());
             },
-            &DataType::VerbatimString { encoding, value } => {
+            &DataType::VerbatimString { encoding: _, value } => {
                 result.extend(value.as_slice());
             },
             &DataType::SimpleString { value } => {

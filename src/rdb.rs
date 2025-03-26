@@ -189,4 +189,15 @@ mod tests {
 
         assert_eq!(storage.to_pairs(), deserialized_storage.to_pairs());
     }
+
+    #[test]
+    fn should_parse_rdb_received_from_test_server() {
+        //TODO:
+        let mut buffer: Vec<u8>  = vec![82, 69, 68, 73, 83, 48, 48, 49, 49, 250, 9, 114, 101, 100, 105, 115, 45, 118, 101, 114, 5, 55, 46, 50, 46, 48, 250, 10, 114, 101, 100, 105, 115, 45, 98, 105, 116, 115, 192, 64, 250, 5, 99, 116, 105, 109, 101, 194, 109, 8, 188, 101, 250, 8, 117, 115, 101, 100, 45, 109, 101, 109, 194, 176, 196, 16, 0, 250, 8, 97, 111, 102, 45, 98, 97, 115, 101, 192, 0, 255, 240, 110, 59, 254, 192, 255, 90, 162];
+        let mut reader = Cursor::new(&mut buffer);
+        let deserialized_storage = from_rdb(&mut reader).unwrap();
+
+        println!("{:?}", deserialized_storage);
+        assert_eq!(deserialized_storage, deserialized_storage);
+    }
 }

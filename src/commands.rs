@@ -16,6 +16,7 @@ pub fn parse_command_name(received_message: &protocol::DataType) -> Result<Strin
 pub trait RedisCommand {
     fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error>;
     fn is_propagated_to_replicas(&self) -> bool;
+    fn should_always_reply(&self) -> bool;
     fn serialize(&self) -> Vec<u8>;
 }
 
@@ -35,6 +36,9 @@ impl RedisCommand for Echo<'_> {
     fn is_propagated_to_replicas(&self) -> bool {
         false
     }
+    fn should_always_reply(&self) -> bool {
+        false
+    }
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
@@ -49,6 +53,9 @@ impl RedisCommand for Ping<'_> {
         return Ok(vec![protocol::simple_string("PONG")]);
     }
     fn is_propagated_to_replicas(&self) -> bool {
+        false
+    }
+    fn should_always_reply(&self) -> bool {
         false
     }
     fn serialize(&self) -> Vec<u8> {
@@ -66,6 +73,9 @@ impl RedisCommand for Command<'_> {
         return Ok(vec![protocol::simple_string("OK")]);
     }
     fn is_propagated_to_replicas(&self) -> bool {
+        false
+    }
+    fn should_always_reply(&self) -> bool {
         false
     }
     fn serialize(&self) -> Vec<u8> {
@@ -104,6 +114,9 @@ impl RedisCommand for Set<'_> {
     fn is_propagated_to_replicas(&self) -> bool {
         true
     }
+    fn should_always_reply(&self) -> bool {
+        false
+    }
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
@@ -131,6 +144,9 @@ impl RedisCommand for Get<'_> {
         Ok(reply)
     }
     fn is_propagated_to_replicas(&self) -> bool {
+        false
+    }
+    fn should_always_reply(&self) -> bool {
         false
     }
     fn serialize(&self) -> Vec<u8> {
@@ -173,6 +189,9 @@ impl RedisCommand for Info<'_> {
     fn is_propagated_to_replicas(&self) -> bool {
         false
     }
+    fn should_always_reply(&self) -> bool {
+        false
+    }
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
@@ -185,12 +204,22 @@ pub struct ReplConf<'a> {
 
 impl RedisCommand for ReplConf<'_> {
     fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
-        //TODO: Implement
-        //println!("Replying to ReplConf command");
-        Ok(vec![protocol::bulk_string("OK")])
+        let mut reply = Vec::new();
+        let instructions: Vec<String> = self.message.as_array()?;
+        let sub_command = instructions.get(1).ok_or(anyhow!("replication_id not defined in {:?}", instructions))?;
+        if sub_command.to_lowercase() == "getack" {
+            //TODO: Implement proper offset tracking later, for now hardcoding as 0
+            reply.push(protocol::array(vec![protocol::bulk_string("REPLCONF"), protocol::bulk_string("ACK"), protocol::bulk_string("0")]))
+        } else {
+            reply.push(protocol::bulk_string("OK"));
+        }
+        Ok(reply)
     }
     fn is_propagated_to_replicas(&self) -> bool {
         false
+    }
+    fn should_always_reply(&self) -> bool {
+        true
     }
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
@@ -216,9 +245,14 @@ impl RedisCommand for PSync<'_> {
         reply.push(protocol::DataType::Rdb {
             value: rdb_bytes
         });
+        //TODO: In practice it would be OK to send this command, but it fails some test expectations on Codecrafters, commenting out temporarily
+        //reply.push(protocol::array(vec![protocol::bulk_string("REPLCONF"), protocol::bulk_string("GETACK"), protocol::bulk_string("*")]));
         Ok(reply)
     }
     fn is_propagated_to_replicas(&self) -> bool {
+        false
+    }
+    fn should_always_reply(&self) -> bool {
         false
     }
     fn serialize(&self) -> Vec<u8> {

@@ -118,7 +118,7 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
     loop {
         let received_messages: Vec<DataType> = io::read_messages(stream)?;
         for received_message in received_messages.into_iter() {
-            println!("Received: {}", String::from_utf8_lossy(&received_message.serialize()));
+            println!("Received: {}", String::from_utf8_lossy(&received_message.serialize()).replace("\r\n", "\\r\\n"));
             match &received_message {
                 protocol::DataType::Array { elements } => {
                     let command_name: String = commands::parse_command_name(&received_message)?;
@@ -144,7 +144,7 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                     }
                     if let Some(command) = command {
                         let reply = command.execute(storage)?;
-                        if should_reply {
+                        if should_reply || command.should_always_reply() {
                             for message in reply.into_iter() {
                                 println!("Sending: {:?}", message);
                                 let message_bytes = &message.serialize();
@@ -152,6 +152,7 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                                 {
                                     stream.write_all(message_bytes)?;
                                 }
+                                //thread::sleep(Duration::from_millis(500));
                             }
                         }
                         let should_propagate_to_replicas = server_state.is_master() && command.is_propagated_to_replicas();
@@ -175,7 +176,7 @@ fn connection_handler(stream: &mut TcpStream, storage: &Arc<Mutex<Storage>>, ser
                         }
                     }
                 },
-                protocol::DataType::SimpleString { value } => {
+                protocol::DataType::SimpleString { value: _ } => {
                     let string_content = received_message.as_string()?;
                     if string_content.starts_with("FULLRESYNC") {
                         let reply_parts: Vec<&str> = string_content.split(" ").collect();
