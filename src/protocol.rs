@@ -2,7 +2,7 @@ use anyhow::Context;
 
 use crate::error::RedisError;
 
-pub fn read_messages_from_bytes(message_bytes: &Vec<u8>) -> Result<Vec<DataType>, anyhow::Error> {
+pub fn read_messages_from_bytes(message_bytes: &[u8]) -> Result<Vec<DataType>, anyhow::Error> {
     let mut messages: Vec<DataType> = Vec::new();
     let mut current_position = 0;
     let total_length = message_bytes.len();
@@ -17,7 +17,7 @@ pub fn read_messages_from_bytes(message_bytes: &Vec<u8>) -> Result<Vec<DataType>
     Ok(messages)
 }
 
-pub fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyhow::Error> {
+pub fn read_message_from_bytes(message_bytes: &[u8]) -> Result<DataType, anyhow::Error> {
     let (parsed, position) = DataType::parse(&message_bytes, 0)?;
     println!("Read message bytes {:?}", message_bytes);
     println!("Parsed them as {:?}", parsed);
@@ -26,7 +26,7 @@ pub fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyh
     } else {
         Err(RedisError { 
             message: format!("Could not parse '{:?}': symbols after position {:?} are left unconsumed, total symbols {:?}",
-                String::from_utf8_lossy(&message_bytes.clone()),
+                String::from_utf8_lossy(message_bytes),
                 position,
                 message_bytes.len()
             )
@@ -34,8 +34,8 @@ pub fn read_message_from_bytes(message_bytes: &Vec<u8>) -> Result<DataType, anyh
     }
 }
 
-fn read_and_assert_symbol(input: &Vec<u8>, symbol: u8, position: usize) -> Result<usize, anyhow::Error> {
-    let error_message = format!("Expected symbol '{}' in '{}' at position {}", symbol as char, String::from_utf8_lossy(&input.clone()), position);
+fn read_and_assert_symbol(input: &[u8], symbol: u8, position: usize) -> Result<usize, anyhow::Error> {
+    let error_message = format!("Expected symbol '{}' in '{}' at position {}", symbol as char, String::from_utf8_lossy(input), position);
     let &actual_symbol = input.get(position).ok_or::<anyhow::Error>(RedisError {
         message: error_message.clone()
     }.into())?;
@@ -56,7 +56,7 @@ fn maybe_slice_of<T>(vec: &[T], start: usize, end: usize) -> Option<&[T]> {
     }
 }
 
-fn find_position_before_terminator(input: &Vec<u8>, terminator: &Vec<u8>, position: usize) -> usize {
+fn find_position_before_terminator(input: &[u8], terminator: &[u8], position: usize) -> usize {
     let mut current = position;
     let mut end_index: Option<usize> = None;
     while end_index == None && current < input.len() {
@@ -434,7 +434,7 @@ impl DataType {
         result
     }
 
-    pub(crate) fn parse(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    pub(crate) fn parse(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
         if let Some(prefix_symbol) = input.get(position) {
             match prefix_symbol {
                 b',' => {
@@ -482,20 +482,20 @@ impl DataType {
                 ch =>
                     Err(RedisError { 
                         message: format!("Could not read the next data type value '{}' at position {}, unsupported prefix '{}'",
-                            String::from_utf8_lossy(&input.clone()),
+                            String::from_utf8_lossy(input),
                             position,
                             String::from_utf8_lossy(&[*ch])
                         )
                     }.into())
             }
         } else {
-            Err(RedisError { message: format!("Could not read the next data type value '{}' at position {}", String::from_utf8_lossy(&input.clone()), position) }.into())
+            Err(RedisError { message: format!("Could not read the next data type value '{}' at position {}", String::from_utf8_lossy(input), position) }.into())
         }
     }
 }
 
-fn parse_double(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Double '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_double(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid Double '{}'", String::from_utf8_lossy(input));
     read_and_assert_symbol(input, b',', position).context(error_message.clone())?;
     let value_start = position + 1;
     let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
@@ -507,8 +507,8 @@ fn parse_double(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), a
     }, value_end + 2))
 }
 
-fn parse_big_number(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid BigNumber '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_big_number(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid BigNumber '{}'", String::from_utf8_lossy(input));
     read_and_assert_symbol(input, b'(', position).context(error_message.clone())?;
     let mut value_start = position + 1;
     let &maybe_sign = input.get(position + 1).ok_or::<anyhow::Error>(RedisError {
@@ -528,8 +528,8 @@ fn parse_big_number(input: &Vec<u8>, position: usize) -> Result<(DataType, usize
     }, value_end + 2))
 }
 
-fn parse_integer(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Integer '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_integer(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid Integer '{}'", String::from_utf8_lossy(input));
     read_and_assert_symbol(input, b':', position).context(error_message.clone())?;
     let value_start = position + 1;
     let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
@@ -540,8 +540,8 @@ fn parse_integer(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), 
     }, value_end + 2))
 }
 
-fn parse_simple_error(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid SimpleError '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_simple_error(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid SimpleError '{}'", String::from_utf8_lossy(input));
     read_and_assert_symbol(input, b'-', position).context(error_message.clone())?;
     let value_start = position + 1;
     let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
@@ -553,8 +553,8 @@ fn parse_simple_error(input: &Vec<u8>, position: usize) -> Result<(DataType, usi
 }
 
 //TODO #1: This can be either a BulkString or RDB, if input ends abruptly without the ending \r\n or continues but not with \r\n it is an RDB file
-fn parse_bulk_string_or_rdb(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_bulk_string_or_rdb(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(input));
     read_and_assert_symbol(input, b'$', position).context(error_message.clone())?;
     let length_start = position + 1;
     let first_length_symbol = input.get(length_start);
@@ -587,8 +587,8 @@ fn parse_bulk_string_or_rdb(input: &Vec<u8>, position: usize) -> Result<(DataTyp
     }
 }
 
-fn parse_bulk_error(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_bulk_error(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(input));
     read_and_assert_symbol(input, b'!', position).context(error_message.clone())?;
     let length_start = position + 1;
     let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
@@ -604,8 +604,8 @@ fn parse_bulk_error(input: &Vec<u8>, position: usize) -> Result<(DataType, usize
     }, value_end + 2))
 }
 
-fn parse_verbatim_string(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid VerbatimString '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_verbatim_string(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid VerbatimString '{}'", String::from_utf8_lossy(input.clone()));
     read_and_assert_symbol(input, b'=', position).context(error_message.clone())?;
     let length_start = position + 1;
     let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
@@ -626,8 +626,8 @@ fn parse_verbatim_string(input: &Vec<u8>, position: usize) -> Result<(DataType, 
     }, value_end + 2))
 }
 
-fn parse_simple_string(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid SimpleString '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_simple_string(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid SimpleString '{}'", String::from_utf8_lossy(input.clone()));
     read_and_assert_symbol(input, b'+', position).context(error_message.clone())?;
     let value_start = position + 1;
     let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
@@ -638,8 +638,8 @@ fn parse_simple_string(input: &Vec<u8>, position: usize) -> Result<(DataType, us
     }, value_end + 2))
 }
 
-fn parse_map(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Map '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_map(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid Map '{}'", String::from_utf8_lossy(input.clone()));
     read_and_assert_symbol(input, b'%', position).context(error_message.clone())?;
     let length_start = position + 1;
     let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
@@ -661,8 +661,8 @@ fn parse_map(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyh
     }, current_position))
 }
 
-fn parse_set(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Set '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_set(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid Set '{}'", String::from_utf8_lossy(input.clone()));
     read_and_assert_symbol(input, b'~', position).context(error_message.clone())?;
     let length_start = position + 1;
     let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
@@ -694,8 +694,8 @@ fn serialize_array_like(elements: &Vec<DataType>, prefix: u8) -> Vec<u8> {
     result
 }
 
-fn parse_array_like(input: &Vec<u8>, position: usize, prefix: u8) -> Result<(Vec<DataType>, usize), anyhow::Error> {
-    let error_message = format!("Invalid Array-like '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_array_like(input: &[u8], position: usize, prefix: u8) -> Result<(Vec<DataType>, usize), anyhow::Error> {
+    let error_message = format!("Invalid Array-like '{}'", String::from_utf8_lossy(input.clone()));
     read_and_assert_symbol(input, prefix, position).context(error_message.clone())?;
     let length_start = position + 1;
     let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
@@ -714,30 +714,30 @@ fn parse_array_like(input: &Vec<u8>, position: usize, prefix: u8) -> Result<(Vec
     Ok((elements, current_position))
 }
 
-fn parse_array(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
+fn parse_array(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
     let (elements, updated_position) = parse_array_like(input, position, b'*')?;
     Ok((DataType::Array {
         elements
     }, updated_position))
 }
 
-fn parse_push(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
+fn parse_push(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
     let (elements, updated_position) = parse_array_like(input, position, b'>')?;
     Ok((DataType::Push {
         elements
     }, updated_position))
 }
 
-fn parse_null(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Null '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_null(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid Null '{}'", String::from_utf8_lossy(input));
     read_and_assert_symbol(input, b'_', position).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\r', position + 1).context(error_message.clone())?;
     read_and_assert_symbol(input, b'\n', position + 2).context(error_message.clone())?;
     Ok((DataType::Null {}, position + 3))
 }
 
-fn parse_boolean(input: &Vec<u8>, position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Null '{}'", String::from_utf8_lossy(&input.clone()));
+fn parse_boolean(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let error_message = format!("Invalid Null '{}'", String::from_utf8_lossy(input));
     read_and_assert_symbol(input, b'#', position).context(error_message.clone())?;
     let &value_input = input.get(position + 1).ok_or::<anyhow::Error>(RedisError { message: error_message.clone() }.into())?;
     let value = value_input == b't';
