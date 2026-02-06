@@ -3,11 +3,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use redis_starter_rust::cli;
-use redis_starter_rust::connection;
-use redis_starter_rust::replication;
-use redis_starter_rust::server_state::ServerState;
-use redis_starter_rust::storage::{Storage, StoredValue};
+use codecrafters_redis::cli;
+use codecrafters_redis::connection;
+use codecrafters_redis::replication;
+use codecrafters_redis::server_state::ServerState;
+use codecrafters_redis::storage::{Storage, StoredValue};
 use std::collections::HashMap;
 
 const DEFAULT_PORT: usize = 6379;

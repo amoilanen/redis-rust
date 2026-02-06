@@ -7,10 +7,10 @@
 /// - Protocol compliance
 /// - Complex real-world scenarios
 
-use redis_starter_rust::commands::*;
-use redis_starter_rust::protocol;
-use redis_starter_rust::storage::{Storage, StoredValue};
-use redis_starter_rust::server_state::ServerState;
+use codecrafters_redis::commands::*;
+use codecrafters_redis::protocol;
+use codecrafters_redis::storage::{Storage, StoredValue};
+use codecrafters_redis::server_state::ServerState;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;

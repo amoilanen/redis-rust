@@ -69,6 +69,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "codecrafters-redis"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "crc64",
+ "rand",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "crc64"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -248,18 +260,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom",
-]
-
-[[package]]
-name = "redis_starter_rust"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "crc64",
- "rand",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
