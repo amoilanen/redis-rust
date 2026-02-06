@@ -37,6 +37,7 @@ pub fn handle_connection(
     server_state: &Arc<ServerState>,
     should_reply: bool,
 ) -> Result<(), anyhow::Error> {
+    println!("accepted new connection");
     loop {
         let received_messages: Vec<DataType> = io::read_messages(stream)?;
         for received_message in received_messages.into_iter() {
