@@ -1,7 +1,10 @@
-pub mod server_state;
+pub mod cli;
 pub mod commands;
-pub mod protocol;
+pub mod connection;
 pub mod error;
 pub mod io;
-pub mod storage;
+pub mod protocol;
+pub mod replication;
 pub mod rdb;
+pub mod server_state;
+pub mod storage;
