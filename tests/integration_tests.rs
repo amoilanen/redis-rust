@@ -201,6 +201,36 @@ fn e2e_key_expires() {
 }
 
 #[test]
+fn e2e_key_expires_uppercase_px() {
+    let storage = create_test_storage();
+
+    // Set with 100ms expiration using uppercase PX (as sent by redis-cli)
+    let msg = protocol::array(vec![
+        protocol::bulk_string("SET"),
+        protocol::bulk_string("blueberry"),
+        protocol::bulk_string("raspberry"),
+        protocol::bulk_string("PX"),
+        protocol::bulk_string("100"),
+    ]);
+    Set { message: &msg }.execute(&storage).unwrap();
+
+    // Should exist immediately
+    let get_msg = protocol::array(vec![
+        protocol::bulk_string("GET"),
+        protocol::bulk_string("blueberry"),
+    ]);
+    let result1 = Get { message: &get_msg }.execute(&storage).unwrap();
+    assert_eq!(result1[0].as_string().unwrap(), "raspberry");
+
+    // Wait for expiration
+    thread::sleep(Duration::from_millis(150));
+
+    // Should be gone now
+    let result2 = Get { message: &get_msg }.execute(&storage).unwrap();
+    assert_eq!(result2[0].as_string().unwrap(), "");
+}
+
+#[test]
 fn e2e_long_lived_key() {
     let storage = create_test_storage();
 

@@ -1,25 +1,5 @@
-/// CLI argument parsing for the Redis server.
-///
-/// This module handles parsing command-line arguments for the Redis server,
-/// including port configuration and replication settings.
+use std::num::ParseIntError;
 
-/// Extracts an option value from command-line arguments.
-///
-/// Looks for `--{option_name}` and returns the following argument as the value.
-///
-/// # Arguments
-/// * `option_name` - The name of the option (without `--` prefix)
-/// * `args` - The command-line arguments
-///
-/// # Returns
-/// The option value if present, None otherwise
-///
-/// # Examples
-/// ```
-/// let args = vec!["program".to_string(), "--port".to_string(), "6380".to_string()];
-/// let port = redis_starter_rust::cli::get_port(&args).unwrap();
-/// assert_eq!(port, Some(6380));
-/// ```
 fn get_option_value(option_name: &str, args: &[String]) -> Option<String> {
     let option_flag = format!("--{}", option_name);
     if let Some(option_position) = args.iter().position(|x| x == &option_flag) {
@@ -29,36 +9,14 @@ fn get_option_value(option_name: &str, args: &[String]) -> Option<String> {
     }
 }
 
-/// Parses the port from command-line arguments.
-///
-/// # Arguments
-/// * `args` - The command-line arguments
-///
-/// # Returns
-/// * `Ok(Some(port))` - If port argument is present and valid
-/// * `Ok(None)` - If no port argument is provided
-/// * `Err(e)` - If port argument is present but invalid
 pub fn get_port(args: &[String]) -> Result<Option<usize>, anyhow::Error> {
-    match get_option_value("port", args) {
-        Some(p) => p.parse().map(Some).map_err(Into::into),
-        None => Ok(None),
-    }
+    get_option_value("port", args)
+        .map(|p|
+            p.parse().map_err(|e: ParseIntError| e.into())
+        )
+        .transpose()
 }
 
-/// Parses the replica-of address from command-line arguments.
-///
-/// # Arguments
-/// * `args` - The command-line arguments
-///
-/// # Returns
-/// The replica-of address if present, None otherwise
-///
-/// # Example
-/// ```
-/// let args = vec!["program".to_string(), "--replicaof".to_string(), "localhost 6379".to_string()];
-/// let replica_of = redis_starter_rust::cli::get_replica_of(&args);
-/// assert_eq!(replica_of, Some("localhost 6379".to_string()));
-/// ```
 pub fn get_replica_of(args: &[String]) -> Option<String> {
     get_option_value("replicaof", args)
 }

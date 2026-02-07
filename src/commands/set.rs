@@ -30,7 +30,7 @@ impl RedisCommand for Set<'_> {
 
         // Parse expiration time if provided
         let expires_in_ms = if let Some(modifier) = instructions.get(3) {
-            if modifier == "px" {
+            if modifier.to_lowercase() == "px" {
                 let expiration_time: u64 = instructions
                     .get(4)
                     .ok_or::<anyhow::Error>(error.clone().into())?

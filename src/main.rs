@@ -34,7 +34,6 @@ fn main() -> Result<(), anyhow::Error> {
         });
     }
 
-    // Start listening for incoming connections
     let server_address = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(&server_address)?;
     println!("Redis server listening on {}", server_address);
