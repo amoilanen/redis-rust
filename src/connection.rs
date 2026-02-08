@@ -4,6 +4,7 @@
 /// executes them, and sends responses back to clients.
 
 use anyhow::anyhow;
+use log::*;
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
@@ -37,11 +38,11 @@ pub fn handle_connection(
     server_state: &Arc<ServerState>,
     should_reply: bool,
 ) -> Result<(), anyhow::Error> {
-    println!("accepted new connection");
+    debug!("accepted new connection");
     loop {
         let received_messages: Vec<DataType> = io::read_messages(stream)?;
         for received_message in received_messages.into_iter() {
-            println!(
+            trace!(
                 "Received: {}",
                 String::from_utf8_lossy(&received_message.serialize()).replace("\r\n", "\\r\\n")
             );
@@ -99,9 +100,9 @@ pub fn handle_connection(
                         let reply = command.execute(storage)?;
                         if should_reply || command.should_always_reply() {
                             for message in reply.into_iter() {
-                                println!("Sending: {:?}", message);
+                                trace!("Sending: {:?}", message);
                                 let message_bytes = &message.serialize();
-                                println!("which serializes to {:?}", message_bytes);
+                                trace!("which serializes to {:?}", message_bytes);
                                 stream.write_all(message_bytes)?;
                             }
                         }
@@ -116,7 +117,7 @@ pub fn handle_connection(
                                 .lock()
                                 .map_err(|e| anyhow!("Failed to lock replica connections: {}", e))?;
                             for replica_stream in replica_streams.iter_mut() {
-                                println!("Propagating command to replica: {:?}", &command_bytes);
+                                debug!("Propagating command to replica: {:?}", &command_bytes);
                                 replica_stream.write_all(&command_bytes)?
                             }
                         }
@@ -125,7 +126,7 @@ pub fn handle_connection(
                 DataType::Rdb { value } => {
                     // Replica receiving RDB snapshot from master
                     let maybe_received_storage = Storage::from_rdb(&value).ok();
-                    println!("Received storage {:?}", &maybe_received_storage);
+                    debug!("Received storage {:?}", &maybe_received_storage);
                     if let Some(received_storage) = maybe_received_storage {
                         let mut storage = storage.lock().map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
                         for (key, value) in received_storage.data.into_iter() {
@@ -142,7 +143,7 @@ pub fn handle_connection(
                             "Could not read replication_id from FULLRESYNC reply {:?}",
                             string_content
                         ))?;
-                        println!(
+                        info!(
                             "Received replication_id {} from the master",
                             replication_id
                         );

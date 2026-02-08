@@ -5,6 +5,7 @@
 
 use std::sync::{Arc, Mutex};
 use anyhow::anyhow;
+use log::*;
 use crate::protocol;
 use crate::storage;
 use crate::server_state;
@@ -29,7 +30,7 @@ impl RedisCommand for PSync<'_> {
             .ok_or(anyhow!("offset is not defined in {:?}", instructions))?
             .parse()?;
 
-        println!(
+        info!(
             "Master handling PSYNC: replication_id = {}, offset = {}",
             replication_id, offset
         );

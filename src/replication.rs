@@ -4,6 +4,7 @@
 /// allowing replicas to connect to a master and receive commands.
 
 use anyhow::{anyhow, ensure};
+use log::*;
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
@@ -31,7 +32,7 @@ use crate::server_state::ServerState;
 ///
 /// # Returns
 /// Error if handshake fails or connection is lost
-pub fn join_replica(
+pub fn join_as_replica(
     master_address: &str,
     server_state: &Arc<ServerState>,
     storage: &Arc<Mutex<Storage>>,
@@ -91,19 +92,9 @@ pub fn join_replica(
     ]);
     stream.write_all(&psync.serialize())?;
 
-    println!("Replica listening for commands from master...");
-    
+    info!("Replica listening for commands from master...");
+
     // Step 5-6: Receive RDB and enter replication loop
     crate::connection::handle_connection(&mut stream, storage, server_state, false)?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_replication_handshake_not_applicable_in_unit_tests() {
-        // Integration test - cannot be tested without a real master
-        // This is a placeholder to ensure test coverage structure
-        assert!(true);
-    }
 }

@@ -8,6 +8,7 @@
 
 use std::sync::{Arc, Mutex};
 use anyhow::anyhow;
+use log::*;
 use crate::protocol;
 use crate::storage;
 use crate::error::RedisError;
@@ -43,8 +44,8 @@ impl RedisCommand for Set<'_> {
             None
         };
 
-        println!("SET {} {}", key, value);
-        println!("expiration_after = {:?}", expires_in_ms);
+        debug!("SET {} {}", key, value);
+        debug!("expiration_after = {:?}", expires_in_ms);
 
         let mut data = storage
             .lock()

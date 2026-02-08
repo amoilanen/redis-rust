@@ -1,45 +1,17 @@
-/// Redis data storage with expiration support.
-///
-/// This module provides the in-memory storage backend for Redis commands.
-/// It supports:
-/// - String key-value pairs
-/// - Per-key expiration times
-/// - RDB serialization/deserialization
-///
-/// # Examples
-/// ```ignore
-/// let storage = Storage::new(HashMap::new());
-/// storage.set("mykey", b"myvalue".to_vec(), None)?;
-/// let value = storage.get("mykey")?;
-/// assert_eq!(value, Some(b"myvalue".to_vec()));
-/// ```
-
 use anyhow::Error;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::Cursor;
 use crate::rdb;
 
-/// A single value stored in Redis with optional expiration.
 #[derive(Debug, PartialEq)]
 pub struct StoredValue {
-    /// Time until expiration in milliseconds, None for no expiration
     expires_in_ms: Option<u64>,
-    /// Timestamp when the value was stored (in milliseconds since UNIX_EPOCH)
     last_modified_timestamp: u128,
-    /// The actual value stored
     pub value: Vec<u8>,
 }
 
 impl StoredValue {
-    /// Creates a new stored value with optional expiration time.
-    ///
-    /// # Arguments
-    /// * `value` - The data to store
-    /// * `expires_in_ms` - Expiration time in milliseconds, None for no expiration
-    ///
-    /// # Returns
-    /// A new StoredValue or error if system time is unavailable
     pub fn from(value: Vec<u8>, expires_in_ms: Option<u64>) -> Result<StoredValue, anyhow::Error> {
         Ok(StoredValue {
             expires_in_ms,
@@ -51,51 +23,27 @@ impl StoredValue {
     }
 }
 
-/// The main in-memory Redis storage.
-///
-/// Stores key-value pairs with support for per-key expiration.
 #[derive(Debug, PartialEq)]
 pub struct Storage {
-    /// The actual data storage
     pub data: HashMap<String, StoredValue>,
 }
 
 impl Storage {
-    /// Creates a new storage instance.
-    ///
-    /// # Arguments
-    /// * `data` - Initial HashMap of stored values
     pub fn new(data: HashMap<String, StoredValue>) -> Storage {
         Storage { data }
     }
 
-    /// Serializes storage to RDB format.
-    ///
-    /// # Returns
-    /// RDB binary data
     pub fn to_rdb(&self) -> Result<Vec<u8>, Error> {
         let mut buffer: Vec<u8> = Vec::new();
         let mut writer = Cursor::new(&mut buffer);
         rdb::to_rdb(&self, &mut writer)?;
         Ok(buffer)
     }
-
-    /// Deserializes storage from RDB format.
-    ///
-    /// # Arguments
-    /// * `rdb` - RDB binary data
-    ///
-    /// # Returns
-    /// Deserialized storage or error if RDB is invalid
     pub fn from_rdb(rdb: &[u8]) -> Result<Storage, Error> {
         let mut reader = Cursor::new(&rdb);
         rdb::from_rdb(&mut reader)
     }
 
-    /// Returns all stored key-value pairs as a HashMap (without expiration info).
-    ///
-    /// # Returns
-    /// HashMap of keys to values
     pub fn to_pairs(&self) -> HashMap<String, Vec<u8>> {
         let mut result = HashMap::new();
         for (key, value) in self.data.iter() {
@@ -104,15 +52,6 @@ impl Storage {
         result
     }
 
-    /// Stores a value with optional expiration.
-    ///
-    /// # Arguments
-    /// * `key` - The key to store
-    /// * `value` - The value to store
-    /// * `expires_in_ms` - Expiration time in milliseconds, None for no expiration
-    ///
-    /// # Returns
-    /// The previous value if key existed, or None
     pub fn set(
         &mut self,
         key: &str,
@@ -125,15 +64,6 @@ impl Storage {
         ))
     }
 
-    /// Retrieves a value by key, checking for expiration.
-    ///
-    /// # Arguments
-    /// * `key` - The key to retrieve
-    ///
-    /// # Returns
-    /// * `Ok(Some(value))` - Key exists and has not expired
-    /// * `Ok(None)` - Key does not exist or has expired
-    /// * `Err(e)` - Error checking system time
     pub fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>, anyhow::Error> {
         let value = match self.data.get(&key.to_owned()) {
             Some(stored_value) => {
@@ -213,7 +143,6 @@ mod tests {
             .set("key", b"value".to_vec(), Some(5000))
             .unwrap();
 
-        // Should still be there before expiration
         let result = storage.get("key").unwrap();
         assert_eq!(result, Some(b"value".to_vec()));
     }
@@ -225,10 +154,8 @@ mod tests {
             .set("key", b"value".to_vec(), Some(100))
             .unwrap();
 
-        // Wait for expiration
         thread::sleep(Duration::from_millis(150));
 
-        // Should be gone after expiration
         let result = storage.get("key").unwrap();
         assert_eq!(result, None);
     }
@@ -238,7 +165,6 @@ mod tests {
         let mut storage = Storage::new(HashMap::new());
         storage.set("key", b"value".to_vec(), None).unwrap();
 
-        // Wait (but value should not expire)
         thread::sleep(Duration::from_millis(100));
 
         let result = storage.get("key").unwrap();
@@ -279,22 +205,6 @@ mod tests {
         assert_eq!(pairs.len(), 2);
         assert_eq!(pairs.get("key1"), Some(&b"value1".to_vec()));
         assert_eq!(pairs.get("key2"), Some(&b"value2".to_vec()));
-    }
-
-    #[test]
-    fn test_stored_value_from() {
-        let value = StoredValue::from(b"test".to_vec(), Some(1000)).unwrap();
-        assert_eq!(value.value, b"test".to_vec());
-        // Just verify it was created successfully
-        // (expires_in_ms is private)
-    }
-
-    #[test]
-    fn test_stored_value_no_expiration() {
-        let value = StoredValue::from(b"test".to_vec(), None).unwrap();
-        assert_eq!(value.value, b"test".to_vec());
-        // Just verify it was created successfully
-        // (expires_in_ms is private)
     }
 
     #[test]

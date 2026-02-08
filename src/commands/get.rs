@@ -4,6 +4,7 @@
 /// Returns: The value at the key, or $-1\r\n if the key doesn't exist
 
 use std::sync::{Arc, Mutex};
+use log::*;
 use crate::protocol;
 use crate::storage;
 use crate::error::RedisError;
@@ -23,7 +24,7 @@ impl RedisCommand for Get<'_> {
 
         let key = instructions.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
 
-        println!("GET {}", key);
+        debug!("GET {}", key);
 
         let mut data = storage
             .lock()

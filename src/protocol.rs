@@ -1,4 +1,5 @@
 use anyhow::Context;
+use log::*;
 
 use crate::error::RedisError;
 
@@ -12,15 +13,15 @@ pub fn read_messages_from_bytes(message_bytes: &[u8]) -> Result<Vec<DataType>, a
         current_position = new_position;
         messages.push(parsed);
     }
-    println!("Read messages bytes {:?}", message_bytes);
-    println!("Parsed them as messages {:?}", messages);
+    trace!("Read messages bytes {:?}", message_bytes);
+    trace!("Parsed them as messages {:?}", messages);
     Ok(messages)
 }
 
 pub fn read_message_from_bytes(message_bytes: &[u8]) -> Result<DataType, anyhow::Error> {
     let (parsed, position) = DataType::parse(&message_bytes, 0)?;
-    println!("Read message bytes {:?}", message_bytes);
-    println!("Parsed them as {:?}", parsed);
+    trace!("Read message bytes {:?}", message_bytes);
+    trace!("Parsed them as {:?}", parsed);
     if position == message_bytes.len() {
         Ok(parsed)
     } else {
