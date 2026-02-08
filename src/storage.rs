@@ -94,135 +94,144 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn test_storage_new_empty() {
+    fn test_storage_new_empty() -> Result<(), anyhow::Error> {
         let data: HashMap<String, StoredValue> = HashMap::new();
         let storage = Storage::new(data);
         assert_eq!(storage.data.len(), 0);
+        Ok(())
     }
 
     #[test]
-    fn test_storage_set_and_get() {
+    fn test_storage_set_and_get() -> Result<(), anyhow::Error> {
         let mut storage = Storage::new(HashMap::new());
-        storage.set("key1", b"value1".to_vec(), None).unwrap();
+        storage.set("key1", b"value1".to_vec(), None)?;
 
-        let result = storage.get("key1").unwrap();
+        let result = storage.get("key1")?;
         assert_eq!(result, Some(b"value1".to_vec()));
+        Ok(())
     }
 
     #[test]
-    fn test_storage_get_nonexistent_key() {
+    fn test_storage_get_nonexistent_key() -> Result<(), anyhow::Error> {
         let mut storage = Storage::new(HashMap::new());
-        let result = storage.get("nonexistent").unwrap();
+        let result = storage.get("nonexistent")?;
         assert_eq!(result, None);
+        Ok(())
     }
 
     #[test]
-    fn test_storage_overwrite_key() {
+    fn test_storage_overwrite_key() -> Result<(), anyhow::Error> {
         let mut storage = Storage::new(HashMap::new());
-        storage.set("key", b"value1".to_vec(), None).unwrap();
-        storage.set("key", b"value2".to_vec(), None).unwrap();
+        storage.set("key", b"value1".to_vec(), None)?;
+        storage.set("key", b"value2".to_vec(), None)?;
 
-        let result = storage.get("key").unwrap();
+        let result = storage.get("key")?;
         assert_eq!(result, Some(b"value2".to_vec()));
+        Ok(())
     }
 
     #[test]
-    fn test_storage_set_returns_old_value() {
+    fn test_storage_set_returns_old_value() -> Result<(), anyhow::Error> {
         let mut storage = Storage::new(HashMap::new());
-        storage.set("key", b"old".to_vec(), None).unwrap();
+        storage.set("key", b"old".to_vec(), None)?;
 
-        let old = storage.set("key", b"new".to_vec(), None).unwrap();
+        let old = storage.set("key", b"new".to_vec(), None)?;
         assert!(old.is_some());
         assert_eq!(old.unwrap().value, b"old".to_vec());
+        Ok(())
     }
 
     #[test]
-    fn test_storage_expiration_not_expired() {
+    fn test_storage_expiration_not_expired() -> Result<(), anyhow::Error> {
         let mut storage = Storage::new(HashMap::new());
         storage
-            .set("key", b"value".to_vec(), Some(5000))
-            .unwrap();
+            .set("key", b"value".to_vec(), Some(5000))?;
 
-        let result = storage.get("key").unwrap();
+        let result = storage.get("key")?;
         assert_eq!(result, Some(b"value".to_vec()));
+        Ok(())
     }
 
     #[test]
-    fn test_storage_expiration_expired() {
+    fn test_storage_expiration_expired() -> Result<(), anyhow::Error> {
         let mut storage = Storage::new(HashMap::new());
         storage
-            .set("key", b"value".to_vec(), Some(100))
-            .unwrap();
+            .set("key", b"value".to_vec(), Some(100))?;
 
         thread::sleep(Duration::from_millis(150));
 
-        let result = storage.get("key").unwrap();
+        let result = storage.get("key")?;
         assert_eq!(result, None);
+        Ok(())
     }
 
     #[test]
-    fn test_storage_no_expiration() {
+    fn test_storage_no_expiration() -> Result<(), anyhow::Error> {
         let mut storage = Storage::new(HashMap::new());
-        storage.set("key", b"value".to_vec(), None).unwrap();
+        storage.set("key", b"value".to_vec(), None)?;
 
         thread::sleep(Duration::from_millis(100));
 
-        let result = storage.get("key").unwrap();
+        let result = storage.get("key")?;
         assert_eq!(result, Some(b"value".to_vec()));
+        Ok(())
     }
 
     #[test]
-    fn test_storage_multiple_keys() {
+    fn test_storage_multiple_keys() -> Result<(), anyhow::Error> {
         let mut storage = Storage::new(HashMap::new());
 
         for i in 0..10 {
             let key = format!("key{}", i);
             let value = format!("value{}", i);
             storage
-                .set(&key, value.as_bytes().to_vec(), None)
-                .unwrap();
+                .set(&key, value.as_bytes().to_vec(), None)?;
         }
 
         assert_eq!(storage.data.len(), 10);
 
         for i in 0..10 {
             let key = format!("key{}", i);
-            let result = storage.get(&key).unwrap();
+            let result = storage.get(&key)?;
             assert_eq!(
                 result,
                 Some(format!("value{}", i).as_bytes().to_vec())
             );
         }
+        Ok(())
     }
 
     #[test]
-    fn test_storage_to_pairs() {
+    fn test_storage_to_pairs() -> Result<(), anyhow::Error> {
         let mut storage = Storage::new(HashMap::new());
-        storage.set("key1", b"value1".to_vec(), None).unwrap();
-        storage.set("key2", b"value2".to_vec(), None).unwrap();
+        storage.set("key1", b"value1".to_vec(), None)?;
+        storage.set("key2", b"value2".to_vec(), None)?;
 
         let pairs = storage.to_pairs();
         assert_eq!(pairs.len(), 2);
         assert_eq!(pairs.get("key1"), Some(&b"value1".to_vec()));
         assert_eq!(pairs.get("key2"), Some(&b"value2".to_vec()));
+        Ok(())
     }
 
     #[test]
-    fn test_storage_binary_data() {
+    fn test_storage_binary_data() -> Result<(), anyhow::Error> {
         let mut storage = Storage::new(HashMap::new());
         let binary = vec![0u8, 1, 2, 255, 254, 127];
 
-        storage.set("binary_key", binary.clone(), None).unwrap();
-        let result = storage.get("binary_key").unwrap();
+        storage.set("binary_key", binary.clone(), None)?;
+        let result = storage.get("binary_key")?;
         assert_eq!(result, Some(binary));
+        Ok(())
     }
 
     #[test]
-    fn test_storage_empty_value() {
+    fn test_storage_empty_value() -> Result<(), anyhow::Error> {
         let mut storage = Storage::new(HashMap::new());
-        storage.set("empty", b"".to_vec(), None).unwrap();
+        storage.set("empty", b"".to_vec(), None)?;
 
-        let result = storage.get("empty").unwrap();
+        let result = storage.get("empty")?;
         assert_eq!(result, Some(b"".to_vec()));
+        Ok(())
     }
 }

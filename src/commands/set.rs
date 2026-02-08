@@ -80,7 +80,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_command_basic() {
+    fn test_set_command_basic() -> Result<(), Box<dyn std::error::Error>> {
         let message = protocol::array(vec![
             protocol::bulk_string("SET"),
             protocol::bulk_string("key1"),
@@ -89,20 +89,21 @@ mod tests {
         let cmd = Set { message: &message };
 
         let storage = create_test_storage();
-        let result = cmd.execute(&storage).unwrap();
+        let result = cmd.execute(&storage)?;
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].as_string().unwrap(), "OK");
+        assert_eq!(result[0].as_string()?, "OK");
         assert!(cmd.is_propagated_to_replicas());
 
         // Verify data was stored
-        let mut data = storage.lock().unwrap();
-        let retrieved = data.get("key1").unwrap();
+        let mut data = storage.lock().map_err(|_| "Failed to lock storage".to_string())?;
+        let retrieved = data.get("key1")?;
         assert_eq!(retrieved, Some(b"value1".to_vec()));
+        Ok(())
     }
 
     #[test]
-    fn test_set_command_with_expiration() {
+    fn test_set_command_with_expiration() -> Result<(), Box<dyn std::error::Error>> {
         let message = protocol::array(vec![
             protocol::bulk_string("SET"),
             protocol::bulk_string("expiring_key"),
@@ -113,14 +114,14 @@ mod tests {
         let cmd = Set { message: &message };
 
         let storage = create_test_storage();
-        let result = cmd.execute(&storage).unwrap();
+        let result = cmd.execute(&storage)?;
 
-        assert_eq!(result[0].as_string().unwrap(), "OK");
+        assert_eq!(result[0].as_string()?, "OK");
 
         // Immediately after set, key should exist
-        let mut data = storage.lock().unwrap();
+        let mut data = storage.lock().map_err(|_| "Failed to lock storage".to_string())?;
         assert_eq!(
-            data.get("expiring_key").unwrap(),
+            data.get("expiring_key")?,
             Some(b"expiring_value".to_vec())
         );
 
@@ -128,12 +129,13 @@ mod tests {
         thread::sleep(Duration::from_millis(150));
 
         // After expiration, key should be gone
-        let mut data = storage.lock().unwrap();
-        assert_eq!(data.get("expiring_key").unwrap(), None);
+        let mut data = storage.lock().map_err(|_| "Failed to lock storage".to_string())?;
+        assert_eq!(data.get("expiring_key")?, None);
+        Ok(())
     }
 
     #[test]
-    fn test_set_command_invalid_syntax() {
+    fn test_set_command_invalid_syntax() -> Result<(), Box<dyn std::error::Error>> {
         let message = protocol::array(vec![
             protocol::bulk_string("SET"),
             protocol::bulk_string("key_only"),
@@ -144,5 +146,6 @@ mod tests {
         let result = cmd.execute(&storage);
 
         assert!(result.is_err());
+        Ok(())
     }
 }

@@ -767,8 +767,8 @@ mod tests {
     }
 
     #[test]
-    fn should_parse_set() {
-        let parsed = DataType::parse(&"~2\r\n:1\r\n$5\r\nhello\r\n".as_bytes().to_vec(), 0).unwrap();
+    fn should_parse_set() -> Result<(), Box<dyn std::error::Error>> {
+        let parsed = DataType::parse(&"~2\r\n:1\r\n$5\r\nhello\r\n".as_bytes().to_vec(), 0)?;
         assert_eq!(parsed.0, DataType::Set {
             elements: vec![
                 DataType::Integer {
@@ -780,6 +780,7 @@ mod tests {
             ]
         });
         assert_eq!(parsed.1, 19);
+        Ok(())
     }
 
     #[test]
@@ -791,81 +792,92 @@ mod tests {
     }
 
     #[test]
-    fn should_parse_verbatim_string() {
-        assert_eq!(DataType::parse(&"=15\r\ntxt:Some string\r\n".as_bytes().to_vec(), 0).unwrap(), (DataType::VerbatimString {
+    fn should_parse_verbatim_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::parse(&"=15\r\ntxt:Some string\r\n".as_bytes().to_vec(), 0)?, (DataType::VerbatimString {
             encoding: "txt".as_bytes().to_vec(),
             value: "Some string".as_bytes().to_vec()
         }, 22));
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_bulk_error() {
+    fn should_serialize_bulk_error() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(String::from_utf8_lossy(&DataType::BulkError {
             value: "Some error".as_bytes().to_vec()
         }.serialize()), "!10\r\nSome error\r\n".to_string());
+        Ok(())
     }
 
     #[test]
-    fn should_parse_bulk_error() {
-        assert_eq!(DataType::parse(&"!21\r\nSYNTAX invalid syntax\r\n".as_bytes().to_vec(), 0).unwrap(), (DataType::BulkError {
+    fn should_parse_bulk_error() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::parse(&"!21\r\nSYNTAX invalid syntax\r\n".as_bytes().to_vec(), 0)?, (DataType::BulkError {
             value: "SYNTAX invalid syntax".as_bytes().to_vec()
         }, 28));
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_big_number() {
+    fn should_serialize_big_number() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(String::from_utf8_lossy(&DataType::BigNumber { sign: b'+', value: "349".as_bytes().to_vec() }.serialize()), "(349\r\n".to_string());
         assert_eq!(String::from_utf8_lossy(&DataType::BigNumber { sign: b'-', value: "349".as_bytes().to_vec() }.serialize()), "(-349\r\n".to_string());
+        Ok(())
     }
 
     #[test]
-    fn should_parse_big_number() {
-        assert_eq!(DataType::parse(&"(349\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::BigNumber { sign: b'+', value: "349".as_bytes().to_vec() });
-        assert_eq!(DataType::parse(&"(+349\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::BigNumber { sign: b'+', value: "349".as_bytes().to_vec() });
-        assert_eq!(DataType::parse(&"(-123\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::BigNumber { sign: b'-', value: "123".as_bytes().to_vec() });
+    fn should_parse_big_number() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::parse(&"(349\r\n".as_bytes().to_vec(), 0)?.0, DataType::BigNumber { sign: b'+', value: "349".as_bytes().to_vec() });
+        assert_eq!(DataType::parse(&"(+349\r\n".as_bytes().to_vec(), 0)?.0, DataType::BigNumber { sign: b'+', value: "349".as_bytes().to_vec() });
+        assert_eq!(DataType::parse(&"(-123\r\n".as_bytes().to_vec(), 0)?.0, DataType::BigNumber { sign: b'-', value: "123".as_bytes().to_vec() });
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_double() {
+    fn should_serialize_double() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(String::from_utf8_lossy(&DataType::Double { value: 1.23 }.serialize()), ",1.23\r\n".to_string());
+        Ok(())
     }
 
     #[test]
-    fn should_parse_double() {
-        assert_eq!(DataType::parse(&",10\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::Double { value: 10.0 });
-        assert_eq!(DataType::parse(&",1.23\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::Double { value: 1.23 });
-        assert_eq!(DataType::parse(&",inf\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::Double { value: f64::INFINITY });
-        assert_eq!(DataType::parse(&",-inf\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::Double { value: f64::NEG_INFINITY });
-        match DataType::parse(&",nan\r\n".as_bytes().to_vec(), 0).unwrap().0 {
+    fn should_parse_double() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::parse(&",10\r\n".as_bytes().to_vec(), 0)?.0, DataType::Double { value: 10.0 });
+        assert_eq!(DataType::parse(&",1.23\r\n".as_bytes().to_vec(), 0)?.0, DataType::Double { value: 1.23 });
+        assert_eq!(DataType::parse(&",inf\r\n".as_bytes().to_vec(), 0)?.0, DataType::Double { value: f64::INFINITY });
+        assert_eq!(DataType::parse(&",-inf\r\n".as_bytes().to_vec(), 0)?.0, DataType::Double { value: f64::NEG_INFINITY });
+        match DataType::parse(&",nan\r\n".as_bytes().to_vec(), 0)?.0 {
             DataType::Double { value } => assert!(value.is_nan()),
             _ => assert!(false)
         }
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_boolean() {
+    fn should_serialize_boolean() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(String::from_utf8_lossy(&DataType::Boolean { value: true }.serialize()), "#t\r\n".to_string());
         assert_eq!(String::from_utf8_lossy(&DataType::Boolean { value: false }.serialize()), "#f\r\n".to_string());
+        Ok(())
     }
 
     #[test]
-    fn should_parse_boolean() {
-        assert_eq!(DataType::parse(&"#t\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::Boolean { value: true });
-        assert_eq!(DataType::parse(&"#f\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::Boolean { value: false });
+    fn should_parse_boolean() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::parse(&"#t\r\n".as_bytes().to_vec(), 0)?.0, DataType::Boolean { value: true });
+        assert_eq!(DataType::parse(&"#f\r\n".as_bytes().to_vec(), 0)?.0, DataType::Boolean { value: false });
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_null() {
+    fn should_serialize_null() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(String::from_utf8_lossy(&DataType::Null {}.serialize()), "_\r\n".to_string());
+        Ok(())
     }
 
     #[test]
-    fn should_parse_null() {
-        assert_eq!(DataType::parse(&"_\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::Null {});
+    fn should_parse_null() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::parse(&"_\r\n".as_bytes().to_vec(), 0)?.0, DataType::Null {});
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_map() {
+    fn should_serialize_map() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(String::from_utf8_lossy(&DataType::Map {
             entries: vec![
                 (
@@ -886,11 +898,12 @@ mod tests {
                 )
             ]
         }.serialize()), "%2\r\n:1\r\n$5\r\nhello\r\n:2\r\n$5\r\nworld\r\n".to_string());
+        Ok(())
     }
 
     #[test]
-    fn should_parse_map() {
-        let parsed = DataType::parse(&"%2\r\n:1\r\n$5\r\nhello\r\n:2\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap();
+    fn should_parse_map() -> Result<(), Box<dyn std::error::Error>> {
+        let parsed = DataType::parse(&"%2\r\n:1\r\n$5\r\nhello\r\n:2\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0)?;
         assert_eq!(parsed.0, DataType::Map {
             entries: vec![
                 (
@@ -911,10 +924,11 @@ mod tests {
                 )
             ]
         });
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_array() {
+    fn should_serialize_array() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(String::from_utf8_lossy(&DataType::Array {
             elements: vec![
                 DataType::BulkString {
@@ -925,11 +939,12 @@ mod tests {
                 }
             ]
         }.serialize()), "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".to_string());
+        Ok(())
     }
 
     #[test]
-    fn should_parse_array() {
-        let mut parsed = DataType::parse(&"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap();
+    fn should_parse_array() -> Result<(), Box<dyn std::error::Error>> {
+        let mut parsed = DataType::parse(&"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0)?;
         assert_eq!(parsed.0, DataType::Array {
             elements: vec![
                 DataType::BulkString {
@@ -942,13 +957,14 @@ mod tests {
         });
         assert_eq!(parsed.1, 26);
 
-        parsed = DataType::parse(&"*-1\r\n".as_bytes().to_vec(), 0).unwrap();
+        parsed = DataType::parse(&"*-1\r\n".as_bytes().to_vec(), 0)?;
         assert_eq!(parsed.0, DataType::Array { elements: Vec::new() });
         assert_eq!(parsed.1, 5);
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_push() {
+    fn should_serialize_push() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(String::from_utf8_lossy(&DataType::Push {
             elements: vec![
                 DataType::BulkString {
@@ -959,11 +975,12 @@ mod tests {
                 }
             ]
         }.serialize()), ">2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".to_string());
+        Ok(())
     }
 
     #[test]
-    fn should_parse_push() {
-        let parsed = DataType::parse(&">2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap();
+    fn should_parse_push() -> Result<(), Box<dyn std::error::Error>> {
+        let parsed = DataType::parse(&">2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0)?;
         assert_eq!(parsed.0, DataType::Push {
             elements: vec![
                 DataType::BulkString {
@@ -975,43 +992,47 @@ mod tests {
             ]
         });
         assert_eq!(parsed.1, 26);
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_bulk_string() {
+    fn should_serialize_bulk_string() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(String::from_utf8_lossy(&DataType::BulkString {
             value: Some("This is a bulk string\r\n One, two three".as_bytes().to_vec())
         }.serialize()), "$38\r\nThis is a bulk string\r\n One, two three\r\n".to_string());
+        Ok(())
     }
 
     #[test]
-    fn should_parse_bulk_string() {
-        assert_eq!(DataType::parse(&"$5\r\nHello\r\n".as_bytes().to_vec(), 0).unwrap(), (DataType::BulkString {
+    fn should_parse_bulk_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::parse(&"$5\r\nHello\r\n".as_bytes().to_vec(), 0)?, (DataType::BulkString {
             value: Some("Hello".as_bytes().to_vec())
         }, 11));
-        assert_eq!(DataType::parse(&"$12\r\nHello\r\nworld\r\n".as_bytes().to_vec(), 0).unwrap(), (DataType::BulkString {
+        assert_eq!(DataType::parse(&"$12\r\nHello\r\nworld\r\n".as_bytes().to_vec(), 0)?, (DataType::BulkString {
             value: Some("Hello\r\nworld".as_bytes().to_vec())
         }, 19));
-        assert_eq!(DataType::parse(&"$-1\r\n".as_bytes().to_vec(), 0).unwrap(), (DataType::BulkString {
+        assert_eq!(DataType::parse(&"$-1\r\n".as_bytes().to_vec(), 0)?, (DataType::BulkString {
             value: None
         }, 5));
-        assert_eq!(DataType::parse(&"$0\r\n\r\n".as_bytes().to_vec(), 0).unwrap(), (DataType::BulkString {
+        assert_eq!(DataType::parse(&"$0\r\n\r\n".as_bytes().to_vec(), 0)?, (DataType::BulkString {
             value: Some(Vec::new())
         }, 6));
+        Ok(())
     }
 
     #[test]
-    fn should_parse_rdb() {
-        assert_eq!(DataType::parse(&"$8\r\nfake_rdb".as_bytes().to_vec(), 0).unwrap(), (DataType::Rdb {
+    fn should_parse_rdb() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::parse(&"$8\r\nfake_rdb".as_bytes().to_vec(), 0)?, (DataType::Rdb {
             value: "fake_rdb".as_bytes().to_vec()
         }, 12));
-        assert_eq!(DataType::parse(&"$9\r\nfake\r\nrdb".as_bytes().to_vec(), 0).unwrap(), (DataType::Rdb {
+        assert_eq!(DataType::parse(&"$9\r\nfake\r\nrdb".as_bytes().to_vec(), 0)?, (DataType::Rdb {
             value: "fake\r\nrdb".as_bytes().to_vec()
         }, 13));
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_integer() {
+    fn should_serialize_integer() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(String::from_utf8_lossy(&DataType::Integer {
             value: 0
         }.serialize()), ":0\r\n".to_string());
@@ -1021,76 +1042,84 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&DataType::Integer {
             value: -15
         }.serialize()), ":-15\r\n".to_string());
+        Ok(())
     }
 
     #[test]
-    fn should_parse_valid_integer() {
-        assert_eq!(DataType::parse(&":+5\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::Integer { value: 5 });
-        assert_eq!(DataType::parse(&":0\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::Integer { value: 0 });
-        assert_eq!(DataType::parse(&":-98\r\n".as_bytes().to_vec(), 0).unwrap().0, DataType::Integer { value: -98 });
+    fn should_parse_valid_integer() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::parse(&":+5\r\n".as_bytes().to_vec(), 0)?.0, DataType::Integer { value: 5 });
+        assert_eq!(DataType::parse(&":0\r\n".as_bytes().to_vec(), 0)?.0, DataType::Integer { value: 0 });
+        assert_eq!(DataType::parse(&":-98\r\n".as_bytes().to_vec(), 0)?.0, DataType::Integer { value: -98 });
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_simple_error() {
+    fn should_serialize_simple_error() -> Result<(), Box<dyn std::error::Error>> {
         let string_value = "Error message";
         let s = DataType::SimpleError {
             value: string_value.as_bytes().to_vec()
         };
         let serialization = s.serialize();
-        assert_eq!(String::from_utf8(serialization).unwrap(), format!("-{}\r\n", string_value))
+        assert_eq!(String::from_utf8(serialization)?, format!("-{}\r\n", string_value));
+        Ok(())
     }
 
     #[test]
-    fn should_parse_valid_simple_error() {
+    fn should_parse_valid_simple_error() -> Result<(), Box<dyn std::error::Error>> {
         let input = "-Error message\r\n".as_bytes().to_vec();
-        let result = DataType::parse(&input, 0).unwrap();
+        let result = DataType::parse(&input, 0)?;
         assert_eq!(result, (DataType::SimpleError {
             value: "Error message".as_bytes().to_vec()
-        }, 16))
+        }, 16));
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_simple_string() {
+    fn should_serialize_simple_string() -> Result<(), Box<dyn std::error::Error>> {
         let string_value = "abcde";
         let s = DataType::SimpleString {
             value: string_value.as_bytes().to_vec()
         };
         let serialization = s.serialize();
-        assert_eq!(String::from_utf8(serialization).unwrap(), format!("+{}\r\n", string_value))
+        assert_eq!(String::from_utf8(serialization)?, format!("+{}\r\n", string_value));
+        Ok(())
     }
 
     #[test]
-    fn should_parse_valid_simple_string() {
+    fn should_parse_valid_simple_string() -> Result<(), Box<dyn std::error::Error>> {
         let input = "+hello\r\n".as_bytes().to_vec();
-        let result = DataType::parse(&input, 0).unwrap();
+        let result = DataType::parse(&input, 0)?;
         assert_eq!(result, (DataType::SimpleString {
             value: "hello".as_bytes().to_vec()
-        }, 8))
+        }, 8));
+        Ok(())
     }
 
     #[test]
-    fn should_not_fail_parsing_if_more_bytes_are_provided() {
+    fn should_not_fail_parsing_if_more_bytes_are_provided() -> Result<(), Box<dyn std::error::Error>> {
         let input = "+hello\r\n+world\r\n";
-        let result = DataType::parse(&input.as_bytes().to_vec(), 0).unwrap();
+        let result = DataType::parse(&input.as_bytes().to_vec(), 0)?;
         assert_eq!(result, (DataType::SimpleString {
             value: "hello".as_bytes().to_vec()
-        }, 8))
+        }, 8));
+        Ok(())
     }
 
     #[test]
-    fn should_fail_parsing_invalid_simple_string() {
+    fn should_fail_parsing_invalid_simple_string() -> Result<(), Box<dyn std::error::Error>> {
         let input = "a+5\r\n";
         let error = DataType::parse(&input.as_bytes().to_vec(), 0).unwrap_err();
-        assert_eq!(format!("{}", error), format!("RedisError: Could not read the next data type value '{}' at position 0, unsupported prefix 'a'", input))
+        assert_eq!(format!("{}", error), format!("RedisError: Could not read the next data type value '{}' at position 0, unsupported prefix 'a'", input));
+        Ok(())
     }
 
     #[test]
-    fn should_read_message_from_bytes() {
-        let parsed_single_message = read_messages_from_bytes(&"$5\r\nHello\r\n".as_bytes().to_vec()).unwrap();
+    fn should_read_message_from_bytes() -> Result<(), Box<dyn std::error::Error>> {
+        let parsed_single_message = read_messages_from_bytes(&"$5\r\nHello\r\n".as_bytes().to_vec())?;
         assert_eq!(parsed_single_message, vec![DataType::BulkString {
             value: Some("Hello".as_bytes().to_vec())
         }]);
-        let parsed_messages = read_messages_from_bytes(&"$1\r\na\r\n$2\r\nbc\r\n$3\r\ndef\r\n".as_bytes().to_vec()).unwrap();
+        let parsed_messages = read_messages_from_bytes(&"$1\r\na\r\n$2\r\nbc\r\n$3\r\ndef\r\n".as_bytes().to_vec())?;
         assert_eq!(parsed_messages, vec![DataType::BulkString {
             value: Some("a".as_bytes().to_vec())
         }, DataType::BulkString {
@@ -1098,5 +1127,6 @@ mod tests {
         }, DataType::BulkString {
             value: Some("def".as_bytes().to_vec())
         }]);
+        Ok(())
     }
 }

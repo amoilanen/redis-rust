@@ -29,10 +29,10 @@ fn main() -> Result<(), anyhow::Error> {
 
     // If this is a replica, spawn a thread to connect to the master
     if let Some(replica_of_address) = server_state.get_replica_of_address()? {
+        let storage = Arc::clone(&storage);
         let server_state = Arc::clone(&server_state);
-        let storage_clone = Arc::clone(&storage);
         thread::spawn(move || {
-            if let Err(e) = replication::join_as_replica(&replica_of_address, &server_state, &storage_clone) {
+            if let Err(e) = replication::join_as_replica(&replica_of_address, &server_state, &storage) {
                 error!("Failed to join replica: {}", e);
             }
         });

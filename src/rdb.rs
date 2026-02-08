@@ -152,63 +152,67 @@ mod tests {
     }
 
     #[test]
-    fn should_encode_and_decode_length() {
+    fn should_encode_and_decode_length() -> Result<(), Box<dyn std::error::Error>> {
         test_encode_decode(14);
         test_encode_decode(1 << 10);
         test_encode_decode(1 << 15);
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_and_deserialize_empty_storage() {
+    fn should_serialize_and_deserialize_empty_storage() -> Result<(), Box<dyn std::error::Error>> {
         let storage = Storage::new(HashMap::new());
 
         let mut buffer: Vec<u8> = Vec::new();
         let mut writer = Cursor::new(&mut buffer);
-        to_rdb(&storage, &mut writer).unwrap();
-        
+        to_rdb(&storage, &mut writer)?;
+
         let mut reader = Cursor::new(&mut buffer);
-        let deserialized_storage = from_rdb(&mut reader).unwrap();
+        let deserialized_storage = from_rdb(&mut reader)?;
 
         assert_eq!(storage, deserialized_storage);
+        Ok(())
     }
 
     #[test]
-    fn should_serialize_and_deserialize_storage_containing_strings_and_numbers() {
+    fn should_serialize_and_deserialize_storage_containing_strings_and_numbers() -> Result<(), Box<dyn std::error::Error>> {
         let mut data: HashMap<String, StoredValue> = HashMap::new();
-        data.insert("key1".to_owned(), StoredValue::from(5u64.to_be_bytes().to_vec(), None).unwrap());
-        data.insert("key2".to_owned(), StoredValue::from("abcde".as_bytes().to_vec(), None).unwrap());
-        data.insert("key3".to_owned(), StoredValue::from(vec![0x01, 0x02, 0x03], None).unwrap());
+        data.insert("key1".to_owned(), StoredValue::from(5u64.to_be_bytes().to_vec(), None)?);
+        data.insert("key2".to_owned(), StoredValue::from("abcde".as_bytes().to_vec(), None)?);
+        data.insert("key3".to_owned(), StoredValue::from(vec![0x01, 0x02, 0x03], None)?);
         let storage = Storage::new(data);
 
         let mut buffer: Vec<u8> = Vec::new();
         let mut writer = Cursor::new(&mut buffer);
-        to_rdb(&storage, &mut writer).unwrap();
+        to_rdb(&storage, &mut writer)?;
 
         let mut reader = Cursor::new(&mut buffer);
-        let deserialized_storage = from_rdb(&mut reader).unwrap();
+        let deserialized_storage = from_rdb(&mut reader)?;
 
         assert_eq!(storage.to_pairs(), deserialized_storage.to_pairs());
+        Ok(())
     }
 
     #[test]
-    fn should_round_trip_storage_with_multiple_keys() {
+    fn should_round_trip_storage_with_multiple_keys() -> Result<(), Box<dyn std::error::Error>> {
         let mut data: HashMap<String, StoredValue> = HashMap::new();
-        data.insert("user:1".to_owned(), StoredValue::from("Alice".as_bytes().to_vec(), None).unwrap());
-        data.insert("user:2".to_owned(), StoredValue::from("Bob".as_bytes().to_vec(), None).unwrap());
-        data.insert("counter".to_owned(), StoredValue::from("42".as_bytes().to_vec(), None).unwrap());
+        data.insert("user:1".to_owned(), StoredValue::from("Alice".as_bytes().to_vec(), None)?);
+        data.insert("user:2".to_owned(), StoredValue::from("Bob".as_bytes().to_vec(), None)?);
+        data.insert("counter".to_owned(), StoredValue::from("42".as_bytes().to_vec(), None)?);
         let storage = Storage::new(data);
 
         let mut buffer: Vec<u8> = Vec::new();
         let mut writer = Cursor::new(&mut buffer);
-        to_rdb(&storage, &mut writer).unwrap();
+        to_rdb(&storage, &mut writer)?;
 
         let mut reader = Cursor::new(&mut buffer);
-        let deserialized_storage = from_rdb(&mut reader).unwrap();
+        let deserialized_storage = from_rdb(&mut reader)?;
 
         assert_eq!(storage.to_pairs().len(), deserialized_storage.to_pairs().len());
         for (key, value) in storage.to_pairs().iter() {
             assert_eq!(deserialized_storage.to_pairs().get(key), Some(value));
         }
+        Ok(())
     }
 
     // Note: This test is currently disabled because it uses Redis 0011 format with
@@ -227,15 +231,15 @@ mod tests {
     //
     // For now, our simplified version handles the basic case needed for testing.
     #[test]
-    fn should_handle_simple_rdb_format() {
+    fn should_handle_simple_rdb_format() -> Result<(), Box<dyn std::error::Error>> {
         // This test verifies our implementation works with our simplified RDB format
         let mut data: HashMap<String, StoredValue> = HashMap::new();
-        data.insert("key1".to_owned(), StoredValue::from("value1".as_bytes().to_vec(), None).unwrap());
+        data.insert("key1".to_owned(), StoredValue::from("value1".as_bytes().to_vec(), None)?);
         let storage = Storage::new(data);
 
         let mut buffer: Vec<u8> = Vec::new();
         let mut writer = Cursor::new(&mut buffer);
-        to_rdb(&storage, &mut writer).unwrap();
+        to_rdb(&storage, &mut writer)?;
 
         // Verify header is correct
         assert_eq!(&buffer[0..9], b"REDIS0007");
@@ -244,5 +248,6 @@ mod tests {
         // Verify end marker is present somewhere
         let has_end_marker = buffer.iter().position(|&b| b == 0xFF).is_some();
         assert!(has_end_marker, "RDB should have end marker (0xFF)");
+        Ok(())
     }
 }

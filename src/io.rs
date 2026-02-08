@@ -120,161 +120,150 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
-    fn test_read_bytes_single_bulk_string() {
+    fn test_read_bytes_single_bulk_string() -> Result<(), Box<dyn std::error::Error>> {
         // Test reading a single bulk string: $5\r\nHello\r\n
         let data = b"$5\r\nHello\r\n";
         let mut cursor = Cursor::new(data.to_vec());
-        
-        let result = read_bytes(&mut cursor);
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-        assert!(bytes.is_some());
-        assert_eq!(bytes.unwrap(), data);
+
+        let result = read_bytes(&mut cursor)?;
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), data);
+        Ok(())
     }
 
     #[test]
-    fn test_read_bytes_multiple_bulk_strings() {
+    fn test_read_bytes_multiple_bulk_strings() -> Result<(), Box<dyn std::error::Error>> {
         // Test reading multiple bulk strings
         let data = b"$5\r\nHello\r\n$5\r\nWorld\r\n";
         let mut cursor = Cursor::new(data.to_vec());
-        
-        let result = read_bytes(&mut cursor);
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-        assert!(bytes.is_some());
-        assert_eq!(bytes.unwrap(), data);
+
+        let result = read_bytes(&mut cursor)?;
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), data);
+        Ok(())
     }
 
     #[test]
-    fn test_read_bytes_empty_stream() {
+    fn test_read_bytes_empty_stream() -> Result<(), Box<dyn std::error::Error>> {
         let data = b"";
         let mut cursor = Cursor::new(data.to_vec());
-        
-        let result = read_bytes(&mut cursor);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), None);
+
+        let result = read_bytes(&mut cursor)?;
+        assert_eq!(result, None);
+        Ok(())
     }
 
     #[test]
-    fn test_read_bytes_simple_string() {
+    fn test_read_bytes_simple_string() -> Result<(), Box<dyn std::error::Error>> {
         // Test reading a simple string: +PONG\r\n
         let data = b"+PONG\r\n";
         let mut cursor = Cursor::new(data.to_vec());
-        
-        let result = read_bytes(&mut cursor);
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-        assert!(bytes.is_some());
-        assert_eq!(bytes.unwrap(), data);
+
+        let result = read_bytes(&mut cursor)?;
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), data);
+        Ok(())
     }
 
     #[test]
-    fn test_read_bytes_array() {
+    fn test_read_bytes_array() -> Result<(), Box<dyn std::error::Error>> {
         // Test reading an array: *2\r\n$4\r\nPING\r\n$4\r\ntest\r\n
         let data = b"*2\r\n$4\r\nPING\r\n$4\r\ntest\r\n";
         let mut cursor = Cursor::new(data.to_vec());
-        
-        let result = read_bytes(&mut cursor);
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-        assert!(bytes.is_some());
-        assert_eq!(bytes.unwrap(), data);
+
+        let result = read_bytes(&mut cursor)?;
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), data);
+        Ok(())
     }
 
     #[test]
-    fn test_read_bytes_integer() {
+    fn test_read_bytes_integer() -> Result<(), Box<dyn std::error::Error>> {
         // Test reading an integer: :1000\r\n
         let data = b":1000\r\n";
         let mut cursor = Cursor::new(data.to_vec());
-        
-        let result = read_bytes(&mut cursor);
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-        assert!(bytes.is_some());
-        assert_eq!(bytes.unwrap(), data);
+
+        let result = read_bytes(&mut cursor)?;
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), data);
+        Ok(())
     }
 
     #[test]
-    fn test_read_bytes_with_binary_data() {
+    fn test_read_bytes_with_binary_data() -> Result<(), Box<dyn std::error::Error>> {
         // Test reading bulk string with binary data
         let data = b"$4\r\n\x00\x01\x02\x03\r\n";
         let mut cursor = Cursor::new(data.to_vec());
-        
-        let result = read_bytes(&mut cursor);
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-        assert!(bytes.is_some());
-        assert_eq!(bytes.unwrap(), data);
+
+        let result = read_bytes(&mut cursor)?;
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), data);
+        Ok(())
     }
 
     #[test]
-    fn test_read_bytes_large_message() {
+    fn test_read_bytes_large_message() -> Result<(), Box<dyn std::error::Error>> {
         // Test reading a message larger than typical buffer
         let mut data = Vec::new();
         data.extend_from_slice(b"$10000\r\n");
         data.extend(vec![b'X'; 10000]);
         data.extend_from_slice(b"\r\n");
-        
+
         let mut cursor = Cursor::new(data.clone());
-        
-        let result = read_bytes(&mut cursor);
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-        assert!(bytes.is_some());
-        assert_eq!(bytes.unwrap(), data);
+
+        let result = read_bytes(&mut cursor)?;
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), data);
+        Ok(())
     }
 
     #[test]
-    fn test_read_bytes_null_bulk_string() {
+    fn test_read_bytes_null_bulk_string() -> Result<(), Box<dyn std::error::Error>> {
         // Test reading null bulk string: $-1\r\n
         let data = b"$-1\r\n";
         let mut cursor = Cursor::new(data.to_vec());
-        
-        let result = read_bytes(&mut cursor);
-        assert!(result.is_ok());
-        let bytes = result.unwrap();
-        assert!(bytes.is_some());
-        assert_eq!(bytes.unwrap(), data);
+
+        let result = read_bytes(&mut cursor)?;
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), data);
+        Ok(())
     }
 
     #[test]
-    fn test_read_single_message() {
+    fn test_read_single_message() -> Result<(), Box<dyn std::error::Error>> {
         // Test reading and parsing a single message
         let data = b"+OK\r\n";
         let mut cursor = Cursor::new(data.to_vec());
-        
-        let result = read_single_message(&mut cursor);
-        assert!(result.is_ok());
-        let msg = result.unwrap();
-        assert!(msg.is_some());
-        
+
+        let result = read_single_message(&mut cursor)?;
+        assert!(result.is_some());
+
         // Verify it's a simple string
-        if let Some(msg) = msg {
-            assert_eq!(msg.as_string().unwrap(), "OK");
+        if let Some(msg) = result {
+            assert_eq!(msg.as_string()?, "OK");
         }
+        Ok(())
     }
 
     #[test]
-    fn test_read_messages_multiple() {
+    fn test_read_messages_multiple() -> Result<(), Box<dyn std::error::Error>> {
         // Test reading multiple messages
         let data = b"$5\r\nhello\r\n:42\r\n";
         let mut cursor = Cursor::new(data.to_vec());
-        
-        let result = read_messages(&mut cursor);
-        assert!(result.is_ok());
-        let msgs = result.unwrap();
+
+        let msgs = read_messages(&mut cursor)?;
         assert_eq!(msgs.len(), 2);
+        Ok(())
     }
 
     #[test]
-    fn test_read_messages_empty() {
+    fn test_read_messages_empty() -> Result<(), Box<dyn std::error::Error>> {
         // Test reading from empty stream
         let data = b"";
         let mut cursor = Cursor::new(data.to_vec());
-        
-        let result = read_messages(&mut cursor);
-        assert!(result.is_ok());
-        let msgs = result.unwrap();
+
+        let msgs = read_messages(&mut cursor)?;
         assert_eq!(msgs.len(), 0);
+        Ok(())
     }
 }

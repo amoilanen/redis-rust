@@ -75,21 +75,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn should_set_replication_id_and_offset_for_master() {
+    fn should_set_replication_id_and_offset_for_master() -> Result<(), Box<dyn std::error::Error>> {
         let state = ServerState::new(None, 1234);
         assert_eq!(state.replica_of, None);
         assert_eq!(state.port, 1234);
         assert_eq!(state.master_replication_offset, Some(0));
         assert_eq!(state.master_replication_id.map(|x| x.len()).unwrap_or(0), 40);
+        Ok(())
     }
 
     #[test]
-    fn should_set_replication_id_and_offset_for_slave() {
+    fn should_set_replication_id_and_offset_for_slave() -> Result<(), Box<dyn std::error::Error>> {
         let state = ServerState::new(Some("localhost 6379".to_owned()), 1234);
         assert_eq!(state.replica_of, Some("localhost 6379".to_owned()));
         assert_eq!(state.port, 1234);
         assert_eq!(state.master_replication_offset, None);
         assert_eq!(state.master_replication_id, None);
+        Ok(())
     }
 }
 
