@@ -133,7 +133,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
- "crc64",
  "env_logger",
  "log",
  "rand",
@@ -146,12 +145,6 @@ name = "colorchoice"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
-
-[[package]]
-name = "crc64"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2707e3afba5e19b75d582d88bc79237418f2a2a2d673d01cf9b03633b46e98f3"
 
 [[package]]
 name = "env_filter"

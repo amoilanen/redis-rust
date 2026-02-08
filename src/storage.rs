@@ -21,6 +21,41 @@ impl StoredValue {
             value,
         })
     }
+
+    /// Creates a StoredValue from an absolute expiry timestamp (ms since Unix epoch).
+    /// Used when loading from RDB where expiry is stored as absolute time.
+    pub fn with_absolute_expiry(value: Vec<u8>, expires_at_ms: Option<u64>) -> Result<StoredValue, anyhow::Error> {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_millis();
+        let expires_in_ms = expires_at_ms.map(|abs_ms| {
+            let abs = abs_ms as u128;
+            if abs > now_ms { (abs - now_ms) as u64 } else { 0 }
+        });
+        Ok(StoredValue {
+            expires_in_ms,
+            last_modified_timestamp: now_ms,
+            value,
+        })
+    }
+
+    /// Returns the absolute expiry timestamp in ms since Unix epoch.
+    pub fn expires_at_ms(&self) -> Option<u64> {
+        self.expires_in_ms.map(|dur| self.last_modified_timestamp as u64 + dur)
+    }
+
+    /// Returns true if this value has already expired.
+    pub fn is_expired(&self) -> bool {
+        if let Some(expires_in_ms) = self.expires_in_ms {
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            now_ms >= self.last_modified_timestamp + expires_in_ms as u128
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -232,6 +267,48 @@ mod tests {
 
         let result = storage.get("empty")?;
         assert_eq!(result, Some(b"".to_vec()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_with_absolute_expiry_future() -> Result<(), anyhow::Error> {
+        let future_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_millis() as u64 + 60_000;
+        let sv = StoredValue::with_absolute_expiry(b"val".to_vec(), Some(future_ms))?;
+        assert!(!sv.is_expired());
+        assert!(sv.expires_at_ms().is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn test_with_absolute_expiry_past() -> Result<(), anyhow::Error> {
+        let sv = StoredValue::with_absolute_expiry(b"val".to_vec(), Some(1000))?;
+        assert!(sv.is_expired());
+        Ok(())
+    }
+
+    #[test]
+    fn test_with_absolute_expiry_none() -> Result<(), anyhow::Error> {
+        let sv = StoredValue::with_absolute_expiry(b"val".to_vec(), None)?;
+        assert!(!sv.is_expired());
+        assert_eq!(sv.expires_at_ms(), None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_expires_at_ms_roundtrip() -> Result<(), anyhow::Error> {
+        let sv = StoredValue::from(b"val".to_vec(), Some(5000))?;
+        let abs = sv.expires_at_ms().expect("should have expiry");
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        assert!(abs >= now && abs <= now + 5100);
+        Ok(())
+    }
+
+    #[test]
+    fn test_is_expired_no_expiry() -> Result<(), anyhow::Error> {
+        let sv = StoredValue::from(b"val".to_vec(), None)?;
+        assert!(!sv.is_expired());
         Ok(())
     }
 }
