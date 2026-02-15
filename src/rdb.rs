@@ -332,6 +332,33 @@ fn skip_value<R: Read>(reader: &mut R, value_type: u8) -> Result<()> {
 // Public API: from_rdb (reader)
 // ---------------------------------------------------------------------------
 
+/// Load a key-value pair from RDB stream, handling expiry and type validation.
+/// String values are inserted into storage; other types are skipped.
+fn load_rdb_key_value<R: Read>(
+    cursor: &mut R,
+    key_str: String,
+    value_type: u8,
+    expiry_ms: Option<u64>,
+    data: &mut HashMap<String, StoredValue>,
+) -> Result<()> {
+    if value_type == RDB_TYPE_STRING {
+        let value = read_string(cursor)?;
+        let stored = StoredValue::with_absolute_expiry(value, expiry_ms)?;
+        if !stored.is_expired() {
+            data.insert(key_str, stored);
+        } else {
+            debug!("Skipping expired key '{}' during RDB load", key_str);
+        }
+    } else {
+        warn!(
+            "Skipping unsupported value type {} for key '{}'",
+            value_type, key_str
+        );
+        skip_value(cursor, value_type)?;
+    }
+    Ok(())
+}
+
 /// Parse an RDB byte stream and return a Storage containing all non-expired string keys.
 ///
 /// Uses a two-phase approach: read all bytes, verify CRC64 checksum, then parse.
@@ -427,21 +454,7 @@ where
                 let key = read_string(&mut cursor)?;
                 let key_str = String::from_utf8(key)?;
 
-                if type_byte[0] == RDB_TYPE_STRING {
-                    let value = read_string(&mut cursor)?;
-                    let stored = StoredValue::with_absolute_expiry(value, Some(expires_at_ms))?;
-                    if !stored.is_expired() {
-                        data.insert(key_str, stored);
-                    } else {
-                        debug!("Skipping expired key '{}' during RDB load", key_str);
-                    }
-                } else {
-                    warn!(
-                        "Skipping unsupported value type {} for key '{}'",
-                        type_byte[0], key_str
-                    );
-                    skip_value(&mut cursor, type_byte[0])?;
-                }
+                load_rdb_key_value(&mut cursor, key_str, type_byte[0], Some(expires_at_ms), &mut data)?;
             }
 
             RDB_OPCODE_EXPIRETIME => {
@@ -455,21 +468,7 @@ where
                 let key = read_string(&mut cursor)?;
                 let key_str = String::from_utf8(key)?;
 
-                if type_byte[0] == RDB_TYPE_STRING {
-                    let value = read_string(&mut cursor)?;
-                    let stored = StoredValue::with_absolute_expiry(value, Some(expires_at_ms))?;
-                    if !stored.is_expired() {
-                        data.insert(key_str, stored);
-                    } else {
-                        debug!("Skipping expired key '{}' during RDB load", key_str);
-                    }
-                } else {
-                    warn!(
-                        "Skipping unsupported value type {} for key '{}'",
-                        type_byte[0], key_str
-                    );
-                    skip_value(&mut cursor, type_byte[0])?;
-                }
+                load_rdb_key_value(&mut cursor, key_str, type_byte[0], Some(expires_at_ms), &mut data)?;
             }
 
             RDB_OPCODE_EOF => {
@@ -481,17 +480,7 @@ where
             value_type => {
                 let key = read_string(&mut cursor)?;
                 let key_str = String::from_utf8(key)?;
-
-                if value_type == RDB_TYPE_STRING {
-                    let value = read_string(&mut cursor)?;
-                    data.insert(key_str, StoredValue::from(value, None)?);
-                } else {
-                    warn!(
-                        "Skipping unsupported value type {} for key '{}'",
-                        value_type, key_str
-                    );
-                    skip_value(&mut cursor, value_type)?;
-                }
+                load_rdb_key_value(&mut cursor, key_str, value_type, None, &mut data)?;
             }
         }
     }
