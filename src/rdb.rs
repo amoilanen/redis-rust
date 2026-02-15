@@ -107,7 +107,7 @@ const fn build_crc64_table() -> [u64; 256] {
     table
 }
 
-fn crc64(data: &[u8]) -> u64 {
+pub fn crc64(data: &[u8]) -> u64 {
     let mut crc: u64 = 0;
     for &byte in data {
         let index = ((crc ^ byte as u64) & 0xFF) as usize;
@@ -213,7 +213,7 @@ fn decode_length<R: Read>(reader: &mut R) -> Result<usize> {
     }
 }
 
-fn encode_length(len: usize) -> Vec<u8> {
+pub fn encode_length(len: usize) -> Vec<u8> {
     if len < 1 << 6 {
         vec![len as u8]
     } else if len < 1 << 14 {
@@ -266,7 +266,7 @@ fn read_string<R: Read>(reader: &mut R) -> Result<Vec<u8>> {
 }
 
 /// Write a raw length-prefixed string.
-fn write_string(buf: &mut Vec<u8>, data: &[u8]) {
+pub fn write_string(buf: &mut Vec<u8>, data: &[u8]) {
     buf.extend(encode_length(data.len()));
     buf.extend_from_slice(data);
 }
