@@ -26,7 +26,7 @@ const BUFFER_SIZE: usize = 2048;
 ///     println!("Received: {:?}", msg);
 /// }
 /// ```
-pub fn read_single_message(reader: &mut dyn Read) -> Result<Option<protocol::DataType>, anyhow::Error> {
+pub fn read_single_message<R: Read>(reader: &mut R) -> Result<Option<protocol::DataType>, anyhow::Error> {
     if let Some(message_bytes) = read_bytes(reader)? {
         Ok(Some(protocol::read_message_from_bytes(&message_bytes)?))
     } else {
@@ -51,7 +51,7 @@ pub fn read_single_message(reader: &mut dyn Read) -> Result<Option<protocol::Dat
 ///     println!("Received: {:?}", msg);
 /// }
 /// ```
-pub fn read_messages(reader: &mut dyn Read) -> Result<Vec<protocol::DataType>, anyhow::Error> {
+pub fn read_messages<R: Read>(reader: &mut R) -> Result<Vec<protocol::DataType>, anyhow::Error> {
     if let Some(message_bytes) = read_bytes(reader)? {
         Ok(protocol::read_messages_from_bytes(&message_bytes)?)
     } else {
@@ -69,7 +69,7 @@ pub fn read_messages(reader: &mut dyn Read) -> Result<Vec<protocol::DataType>, a
 ///
 /// # Returns
 /// The number of bytes read, or 0 on error or EOF
-fn read_next_bytes(reader: &mut dyn Read, buffer: &mut [u8]) -> usize {
+fn read_next_bytes<R: Read>(reader: &mut R, buffer: &mut [u8]) -> usize {
     match reader.read(buffer) {
         Ok(bytes_read) => bytes_read,
         Err(_) => 0,
@@ -91,7 +91,7 @@ fn read_next_bytes(reader: &mut dyn Read, buffer: &mut [u8]) -> usize {
 ///
 /// # Note
 /// When using this with `TcpStream`, ensure a read timeout is set to avoid blocking indefinitely.
-pub fn read_bytes(reader: &mut dyn Read) -> Result<Option<Vec<u8>>, anyhow::Error> {
+pub fn read_bytes<R: Read>(reader: &mut R) -> Result<Option<Vec<u8>>, anyhow::Error> {
     let mut buffer = [0u8; BUFFER_SIZE];
     let mut message_bytes: Vec<u8> = Vec::new();
     let mut total_read_bytes = 0;
