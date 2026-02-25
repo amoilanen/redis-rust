@@ -19,18 +19,12 @@ pub fn read_messages_from_bytes(message_bytes: &[u8]) -> Result<Vec<DataType>, a
 }
 
 pub fn read_message_from_bytes(message_bytes: &[u8]) -> Result<DataType, anyhow::Error> {
-    let (parsed, position) = DataType::parse(&message_bytes, 0)?;
-    trace!("Read message bytes {:?}", message_bytes);
-    trace!("Parsed them as {:?}", parsed);
-    if position == message_bytes.len() {
-        Ok(parsed)
-    } else {
-        Err(RedisError { 
-            message: format!("Could not parse '{:?}': symbols after position {:?} are left unconsumed, total symbols {:?}",
-                String::from_utf8_lossy(message_bytes),
-                position,
-                message_bytes.len()
-            )
+    let mut messages = read_messages_from_bytes(message_bytes)?;
+    match messages.len() {
+        1 => Ok(messages.remove(0)),
+        n => Err(RedisError {
+            message: format!("Expected exactly 1 message in '{}', got {}",
+                String::from_utf8_lossy(message_bytes), n)
         }.into())
     }
 }

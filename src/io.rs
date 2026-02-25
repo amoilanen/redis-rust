@@ -9,53 +9,20 @@ use crate::protocol;
 /// Size of the read buffer for TCP operations
 const BUFFER_SIZE: usize = 2048;
 
-/// Reads a single message from a reader.
-///
-/// # Arguments
-/// * `reader` - Any type implementing `Read` trait
-///
-/// # Returns
-/// * `Ok(Some(message))` - A complete message was read
-/// * `Ok(None)` - No data available (connection likely closed)
-/// * `Err(e)` - Error parsing or reading
-///
-/// # Examples
-/// ```ignore
-/// let mut stream = TcpStream::connect("127.0.0.1:6379")?;
-/// if let Some(msg) = read_single_message(&mut stream)? {
-///     println!("Received: {:?}", msg);
-/// }
-/// ```
-pub fn read_single_message<R: Read>(reader: &mut R) -> Result<Option<protocol::DataType>, anyhow::Error> {
-    if let Some(message_bytes) = read_bytes(reader)? {
-        Ok(Some(protocol::read_message_from_bytes(&message_bytes)?))
-    } else {
-        Ok(None)
-    }
-}
-
-/// Reads multiple messages from a reader.
-///
-/// # Arguments
-/// * `reader` - Any type implementing `Read` trait
-///
-/// # Returns
-/// * `Ok(messages)` - A vector of parsed messages (empty if no data)
-/// * `Err(e)` - Error parsing or reading
-///
-/// # Examples
-/// ```ignore
-/// let mut stream = TcpStream::connect("127.0.0.1:6379")?;
-/// let messages = read_messages(&mut stream)?;
-/// for msg in messages {
-///     println!("Received: {:?}", msg);
-/// }
-/// ```
 pub fn read_messages<R: Read>(reader: &mut R) -> Result<Vec<protocol::DataType>, anyhow::Error> {
     if let Some(message_bytes) = read_bytes(reader)? {
         Ok(protocol::read_messages_from_bytes(&message_bytes)?)
     } else {
         Ok(Vec::new())
+    }
+}
+
+pub fn read_single_message<R: Read>(reader: &mut R) -> Result<Option<protocol::DataType>, anyhow::Error> {
+    let messages = read_messages(reader)?;
+    match messages.len() {
+        0 => Ok(None),
+        1 => Ok(messages.into_iter().next()),
+        n => Err(anyhow::anyhow!("Expected at most 1 message, got {n}"))
     }
 }
 
