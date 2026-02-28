@@ -1,4 +1,3 @@
-use anyhow::Context;
 use log::*;
 
 use crate::error::RedisError;
@@ -29,48 +28,34 @@ pub fn read_message_from_bytes(message_bytes: &[u8]) -> Result<DataType, anyhow:
     }
 }
 
-fn read_and_assert_symbol(input: &[u8], symbol: u8, position: usize) -> Result<usize, anyhow::Error> {
-    let error_message = format!("Expected symbol '{}' in '{}' at position {}", symbol as char, String::from_utf8_lossy(input), position);
-    let &actual_symbol = input.get(position).ok_or::<anyhow::Error>(RedisError {
-        message: error_message.clone()
-    }.into())?;
-    if actual_symbol != symbol {
-        Err(RedisError {
-            message: error_message
+fn find_crlf(input: &[u8], from: usize) -> Result<usize, anyhow::Error> {
+    input[from..].windows(2)
+        .position(|w| w == b"\r\n")
+        .map(|p| from + p)
+        .ok_or_else(|| RedisError {
+            message: format!("Expected \\r\\n in '{}'", String::from_utf8_lossy(input))
         }.into())
-    } else {
-        Ok(position + 1)
-    }
 }
 
-fn maybe_slice_of<T>(vec: &[T], start: usize, end: usize) -> Option<&[T]> {
-    if start > vec.len() || end > vec.len() || start > end {
-        None
-    } else {
-        Some(&vec[start..end])
-    }
+fn parse_simple_line(input: &[u8], from: usize) -> Result<(&[u8], usize), anyhow::Error> {
+    let crlf = find_crlf(input, from)?;
+    Ok((&input[from..crlf], crlf + 2))
 }
 
-fn find_position_before_terminator(input: &[u8], terminator: &[u8], position: usize) -> usize {
-    let mut current = position;
-    let mut end_index: Option<usize> = None;
-    while end_index == None && current < input.len() {
-        let mut terminator_current = 0;
-        while current < input.len() && terminator_current < terminator.len() && input[current] == terminator[terminator_current] {
-            current = current + 1;
-            terminator_current = terminator_current + 1;
-        }
-        if terminator_current == terminator.len() && terminator.len() > 0 {
-            end_index = Some(current - terminator.len())
-        } else {
-            current = current + 1
-        }
+fn parse_length_prefixed_payload(input: &[u8], from: usize) -> Result<(&[u8], usize), anyhow::Error> {
+    let (length_bytes, payload_start) = parse_simple_line(input, from)?;
+    let length: usize = std::str::from_utf8(length_bytes)?.parse()?;
+    let payload_end = payload_start + length;
+    let payload = input.get(payload_start..payload_end)
+        .ok_or_else(|| RedisError {
+            message: format!("Payload truncated in '{}'", String::from_utf8_lossy(input))
+        })?;
+    if input.get(payload_end..payload_end + 2) != Some(b"\r\n") {
+        return Err(RedisError {
+            message: format!("Missing trailing \\r\\n in '{}'", String::from_utf8_lossy(input))
+        }.into());
     }
-    if let Some(new_position) = end_index {
-        new_position
-    } else {
-        current
-    }
+    Ok((payload, payload_end + 2))
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -490,192 +475,85 @@ impl DataType {
 }
 
 fn parse_double(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Double '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b',', position).context(error_message.clone())?;
-    let value_start = position + 1;
-    let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
-    read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-    let value: f64 = String::from_utf8(input[value_start..value_end].to_vec())?.parse()?;
-    Ok((DataType::Double {
-        value
-    }, value_end + 2))
+    let (line, new_pos) = parse_simple_line(input, position + 1)?;
+    let value: f64 = std::str::from_utf8(line)?.parse()?;
+    Ok((DataType::Double { value }, new_pos))
 }
 
 fn parse_big_number(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid BigNumber '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b'(', position).context(error_message.clone())?;
-    let mut value_start = position + 1;
-    let &maybe_sign = input.get(position + 1).ok_or::<anyhow::Error>(RedisError {
-        message: error_message.clone()
-    }.into())?;
-    let mut sign: Option<u8> = None;
-    if maybe_sign == b'+' || maybe_sign == b'-' {
-        value_start = position + 2;
-        sign = Some(maybe_sign);
-    }
-    let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
-    read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-    Ok((DataType::BigNumber {
-        sign: sign.unwrap_or(b'+'),
-        value: input[value_start..value_end].to_vec()
-    }, value_end + 2))
+    let (line, new_pos) = parse_simple_line(input, position + 1)?;
+    let (sign, digits) = match line.first() {
+        Some(&b'+') => (b'+', &line[1..]),
+        Some(&b'-') => (b'-', &line[1..]),
+        _           => (b'+', line),
+    };
+    Ok((DataType::BigNumber { sign, value: digits.to_vec() }, new_pos))
 }
 
 fn parse_integer(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Integer '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b':', position).context(error_message.clone())?;
-    let value_start = position + 1;
-    let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
-    read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-    Ok((DataType::Integer {
-        value: std::str::from_utf8(&input[value_start..value_end])?.parse()?
-    }, value_end + 2))
+    let (line, new_pos) = parse_simple_line(input, position + 1)?;
+    let value: i64 = std::str::from_utf8(line)?.parse()?;
+    Ok((DataType::Integer { value }, new_pos))
 }
 
 fn parse_simple_error(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid SimpleError '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b'-', position).context(error_message.clone())?;
-    let value_start = position + 1;
-    let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
-    read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-    Ok((DataType::SimpleError {
-        value: input[value_start..value_end].to_vec()
-    }, value_end + 2))
+    let (value, new_pos) = parse_simple_line(input, position + 1)?;
+    Ok((DataType::SimpleError { value: value.to_vec() }, new_pos))
 }
 
-//TODO #1: This can be either a BulkString or RDB, if input ends abruptly without the ending \r\n or continues but not with \r\n it is an RDB file
+// This can be either a BulkString or RDB: if input ends without a trailing \r\n it is an RDB file.
 fn parse_bulk_string_or_rdb(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b'$', position).context(error_message.clone())?;
-    let length_start = position + 1;
-    let first_length_symbol = input.get(length_start);
-
-    let mut new_position = position ;
-    if first_length_symbol != Some(&b'-') {
-        let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
-        let string_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
-        read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
-        read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
-        let value_start = length_end + 2;
-        let value_end = length_end + 2 + string_length;
-
-        let maybe_bulk_string_end = maybe_slice_of(input, value_end, value_end + 2);
-        if maybe_bulk_string_end == Some("\r\n".as_bytes()) {
-            new_position = value_end + 2;
-            Ok((DataType::BulkString {
-                value: Some(input[value_start..value_end].to_vec())
-            }, new_position))
-        } else {
-            Ok((DataType::Rdb {
-                value: input[value_start..value_end].to_vec()
-            }, value_end))
-        }
+    let (length_bytes, payload_start) = parse_simple_line(input, position + 1)?;
+    if length_bytes == b"-1" {
+        return Ok((DataType::BulkString { value: None }, payload_start));
+    }
+    let length: usize = std::str::from_utf8(length_bytes)?.parse()?;
+    let payload_end = payload_start + length;
+    if input.get(payload_end..payload_end + 2) == Some(b"\r\n") {
+        Ok((DataType::BulkString { value: Some(input[payload_start..payload_end].to_vec()) }, payload_end + 2))
     } else {
-        new_position = new_position + "$-1\r\n".len();
-        Ok((DataType::BulkString {
-            value: None
-        }, new_position))
+        Ok((DataType::Rdb { value: input[payload_start..payload_end].to_vec() }, payload_end))
     }
 }
 
 fn parse_bulk_error(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid BulkString '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b'!', position).context(error_message.clone())?;
-    let length_start = position + 1;
-    let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
-    let content_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
-    read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
-    let value_start = length_end + 2;
-    let value_end = length_end + 2 + content_length;
-    read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-    Ok((DataType::BulkError {
-        value: input[value_start..value_end].to_vec()
-    }, value_end + 2))
+    let (value, new_pos) = parse_length_prefixed_payload(input, position + 1)?;
+    Ok((DataType::BulkError { value: value.to_vec() }, new_pos))
 }
 
 fn parse_verbatim_string(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid VerbatimString '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b'=', position).context(error_message.clone())?;
-    let length_start = position + 1;
-    let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
-    let content_length: usize = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
-    read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
-    let value_start = length_end + 2;
-    let value_end = length_end + 2 + content_length;
-    read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-    let encoding_and_content = input[value_start..value_end].to_vec();
-    let index_before_content = encoding_and_content.iter().position(|&ch| ch == b':').ok_or(RedisError {
-        message: error_message.clone()
-    })?;
+    let (payload, new_pos) = parse_length_prefixed_payload(input, position + 1)?;
+    let sep = payload.iter().position(|&b| b == b':')
+        .ok_or_else(|| RedisError {
+            message: format!("Invalid VerbatimString '{}'", String::from_utf8_lossy(input))
+        })?;
     Ok((DataType::VerbatimString {
-        encoding: input[value_start..(value_start + index_before_content)].to_vec(),
-        value: input[(value_start + index_before_content + 1)..value_end].to_vec()
-    }, value_end + 2))
+        encoding: payload[..sep].to_vec(),
+        value: payload[sep + 1..].to_vec(),
+    }, new_pos))
 }
 
 fn parse_simple_string(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid SimpleString '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b'+', position).context(error_message.clone())?;
-    let value_start = position + 1;
-    let value_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), value_start);
-    read_and_assert_symbol(input, b'\r', value_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', value_end + 1).context(error_message.clone())?;
-    Ok((DataType::SimpleString {
-        value: input[value_start..value_end].to_vec()
-    }, value_end + 2))
+    let (value, new_pos) = parse_simple_line(input, position + 1)?;
+    Ok((DataType::SimpleString { value: value.to_vec() }, new_pos))
 }
 
 fn parse_map(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Map '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b'%', position).context(error_message.clone())?;
-    let length_start = position + 1;
-    let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
-    let map_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
-    read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
-    let mut entries: Vec<(DataType, DataType)> = Vec::new();
-    let mut read_entry_count = 0;
-    let mut current_position = length_end + 2;
-    while read_entry_count < map_length {
-        let next_read_key = DataType::parse(input, current_position)?;
-        let next_read_value = DataType::parse(input, next_read_key.1)?;
-        entries.push((next_read_key.0, next_read_value.0));
-        current_position = next_read_value.1;
-        read_entry_count = read_entry_count + 1;
+    let (length_bytes, mut current_pos) = parse_simple_line(input, position + 1)?;
+    let count: i64 = std::str::from_utf8(length_bytes)?.parse()?;
+    let mut entries = Vec::new();
+    for _ in 0..count {
+        let (key, after_key) = DataType::parse(input, current_pos)?;
+        let (value, after_value) = DataType::parse(input, after_key)?;
+        entries.push((key, value));
+        current_pos = after_value;
     }
-    Ok((DataType::Map {
-        entries
-    }, current_position))
+    Ok((DataType::Map { entries }, current_pos))
 }
 
 fn parse_set(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Set '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b'~', position).context(error_message.clone())?;
-    let length_start = position + 1;
-    let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
-    let map_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
-    read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
-    let mut elements: Vec<DataType> = Vec::new();
-    let mut read_element_count = 0;
-    let mut current_position = length_end + 2;
-    while read_element_count < map_length {
-        let (next_element, next_position) = DataType::parse(input, current_position)?;
-        elements.push(next_element);
-        read_element_count = read_element_count + 1;
-        current_position = next_position;
-    }
-    Ok((DataType::Set {
-        elements
-    }, current_position))
+    let (elements, new_pos) = parse_array_like(input, position)?;
+    Ok((DataType::Set { elements }, new_pos))
 }
 
 fn serialize_array_like(elements: &Vec<DataType>, prefix: u8) -> Vec<u8> {
@@ -689,56 +567,42 @@ fn serialize_array_like(elements: &Vec<DataType>, prefix: u8) -> Vec<u8> {
     result
 }
 
-fn parse_array_like(input: &[u8], position: usize, prefix: u8) -> Result<(Vec<DataType>, usize), anyhow::Error> {
-    let error_message = format!("Invalid Array-like '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, prefix, position).context(error_message.clone())?;
-    let length_start = position + 1;
-    let length_end = find_position_before_terminator(input, &"\r\n".as_bytes().to_vec(), length_start);
-    let array_length: i64 = String::from_utf8_lossy(&input[length_start..length_end]).parse()?;
-    read_and_assert_symbol(input, b'\r', length_end).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', length_end + 1).context(error_message.clone())?;
-    let mut elements: Vec<DataType> = Vec::new();
-    let mut read_element_count = 0;
-    let mut current_position = length_end + 2;
-    while read_element_count < array_length {
-        let next_read_element = DataType::parse(input, current_position)?;
-        elements.push(next_read_element.0);
-        current_position = next_read_element.1;
-        read_element_count = read_element_count + 1;
+fn parse_array_like(input: &[u8], position: usize) -> Result<(Vec<DataType>, usize), anyhow::Error> {
+    let (length_bytes, mut current_pos) = parse_simple_line(input, position + 1)?;
+    let count: i64 = std::str::from_utf8(length_bytes)?.parse()?;
+    let mut elements = Vec::new();
+    for _ in 0..count {
+        let (element, next_pos) = DataType::parse(input, current_pos)?;
+        elements.push(element);
+        current_pos = next_pos;
     }
-    Ok((elements, current_position))
+    Ok((elements, current_pos))
 }
 
 fn parse_array(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let (elements, updated_position) = parse_array_like(input, position, b'*')?;
-    Ok((DataType::Array {
-        elements
-    }, updated_position))
+    let (elements, new_pos) = parse_array_like(input, position)?;
+    Ok((DataType::Array { elements }, new_pos))
 }
 
 fn parse_push(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let (elements, updated_position) = parse_array_like(input, position, b'>')?;
-    Ok((DataType::Push {
-        elements
-    }, updated_position))
+    let (elements, new_pos) = parse_array_like(input, position)?;
+    Ok((DataType::Push { elements }, new_pos))
 }
 
 fn parse_null(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Null '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b'_', position).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\r', position + 1).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', position + 2).context(error_message.clone())?;
-    Ok((DataType::Null {}, position + 3))
+    if input.get(position..position + 3) == Some(b"_\r\n") {
+        Ok((DataType::Null {}, position + 3))
+    } else {
+        Err(RedisError { message: format!("Invalid Null in '{}'", String::from_utf8_lossy(input)) }.into())
+    }
 }
 
 fn parse_boolean(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
-    let error_message = format!("Invalid Null '{}'", String::from_utf8_lossy(input));
-    read_and_assert_symbol(input, b'#', position).context(error_message.clone())?;
-    let &value_input = input.get(position + 1).ok_or::<anyhow::Error>(RedisError { message: error_message.clone() }.into())?;
-    let value = value_input == b't';
-    read_and_assert_symbol(input, b'\r', position + 2).context(error_message.clone())?;
-    read_and_assert_symbol(input, b'\n', position + 3).context(error_message.clone())?;
-    Ok((DataType::Boolean { value }, position + 4))
+    match input.get(position..position + 4) {
+        Some(b"#t\r\n") => Ok((DataType::Boolean { value: true }, position + 4)),
+        Some(b"#f\r\n") => Ok((DataType::Boolean { value: false }, position + 4)),
+        _ => Err(RedisError { message: format!("Invalid Boolean in '{}'", String::from_utf8_lossy(input)) }.into()),
+    }
 }
 
 #[cfg(test)]
