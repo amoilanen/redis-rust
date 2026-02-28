@@ -20,7 +20,7 @@ pub struct PSync<'a> {
 impl RedisCommand for PSync<'_> {
     fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let mut reply = Vec::new();
-        let instructions: Vec<String> = self.message.as_array()?;
+        let instructions: Vec<String> = self.message.as_vec()?;
 
         let replication_id = instructions
             .get(1)

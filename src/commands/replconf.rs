@@ -23,7 +23,7 @@ pub struct ReplConf<'a> {
 impl RedisCommand for ReplConf<'_> {
     fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let mut reply = Vec::new();
-        let instructions: Vec<String> = self.message.as_array()?;
+        let instructions: Vec<String> = self.message.as_vec()?;
         let sub_command = instructions
             .get(1)
             .ok_or(anyhow!("replication_id not defined in {:?}", instructions))?;
@@ -98,7 +98,7 @@ mod tests {
         let result = cmd.execute(&storage).unwrap();
 
         assert_eq!(result.len(), 1);
-        let response = result[0].as_array().unwrap();
+        let response = result[0].as_vec().unwrap();
         assert_eq!(response.len(), 3);
         assert_eq!(response[0], "REPLCONF");
         assert_eq!(response[1], "ACK");

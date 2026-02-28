@@ -47,7 +47,7 @@ mod tests {
             protocol::bulk_string("ECHO"),
             echo_msg.clone(),
         ]);
-        let elements: Vec<protocol::DataType> = message.as_array()
+        let elements: Vec<protocol::DataType> = message.as_vec()
             .unwrap()
             .iter()
             .map(|s| protocol::bulk_string(s))

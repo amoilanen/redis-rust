@@ -1,3 +1,5 @@
+use std::str::from_utf8;
+
 use log::*;
 
 use crate::error::RedisError;
@@ -44,7 +46,7 @@ fn parse_simple_line(input: &[u8], from: usize) -> Result<(&[u8], usize), anyhow
 
 fn parse_length_prefixed_payload(input: &[u8], from: usize) -> Result<(&[u8], usize), anyhow::Error> {
     let (length_bytes, payload_start) = parse_simple_line(input, from)?;
-    let length: usize = std::str::from_utf8(length_bytes)?.parse()?;
+    let length: usize = from_utf8(length_bytes)?.parse()?;
     let payload_end = payload_start + length;
     let payload = input.get(payload_start..payload_end)
         .ok_or_else(|| RedisError {
@@ -141,67 +143,46 @@ pub fn array(elements: Vec<DataType>) -> DataType {
     DataType::Array { elements }
 }
 
-//TODO: Implement the rest of the constructors
-/*
-    BigNumber {
-        sign: u8,
-        value: Vec<u8> // more efficient representation is possible
-    },
-    Integer {
-        value: i64
-    },
-    SimpleError {
-        value: Vec<u8>
-    },
-    BulkString {
-        value: Option<Vec<u8>>
-    },
-    BulkError {
-        value: Vec<u8>
-    },
-    VerbatimString {
-        encoding: Vec<u8>,
-        value: Vec<u8>
-    },
-    Map {
-        entries: Vec<(DataType, DataType)>
-    },
-    Set {
-        elements: Vec<DataType>
-    },
-    Push {
-        elements: Vec<DataType>
+pub fn integer(value: i64) -> DataType {
+    DataType::Integer { value }
+}
+
+pub fn simple_error(value: &str) -> DataType {
+    DataType::SimpleError { value: value.as_bytes().to_vec() }
+}
+
+pub fn bulk_error(value: &str) -> DataType {
+    DataType::BulkError { value: value.as_bytes().to_vec() }
+}
+
+// value may include a leading '+' or '-'; an unsigned value is treated as positive.
+pub fn big_number(value: &str) -> DataType {
+    let (sign, digits) = match value.as_bytes().first() {
+        Some(&b'-') => (b'-', &value[1..]),
+        Some(&b'+') => (b'+', &value[1..]),
+        _           => (b'+', value),
+    };
+    DataType::BigNumber { sign, value: digits.as_bytes().to_vec() }
+}
+
+pub fn verbatim_string(encoding: &str, value: &str) -> DataType {
+    DataType::VerbatimString {
+        encoding: encoding.as_bytes().to_vec(),
+        value: value.as_bytes().to_vec(),
     }
-*/
-
-/*
-pub(crate) fn big_number(value: f64) -> DataType {
 }
 
-pub(crate) fn integer(value: f64) -> DataType {
+pub fn map(entries: Vec<(DataType, DataType)>) -> DataType {
+    DataType::Map { entries }
 }
 
-pub(crate) fn simple_error(value: f64) -> DataType {
+pub fn set(elements: Vec<DataType>) -> DataType {
+    DataType::Set { elements }
 }
 
-pub(crate) fn bulk_string(value: f64) -> DataType {
+pub fn push(elements: Vec<DataType>) -> DataType {
+    DataType::Push { elements }
 }
-
-pub(crate) fn bulk_error(value: f64) -> DataType {
-}
-
-pub(crate) fn verbatim_string(value: f64) -> DataType {
-}
-
-pub(crate) fn map(value: f64) -> DataType {
-}
-
-pub(crate) fn set(value: f64) -> DataType {
-}
-
-pub(crate) fn push(value: f64) -> DataType {
-}
-*/
 
 pub fn null() -> DataType {
     DataType::Null
@@ -215,7 +196,7 @@ pub fn boolean(value: bool) -> DataType {
 
 impl DataType {
 
-    pub fn as_array(&self) -> Result<Vec<String>, anyhow::Error> {
+    pub fn as_vec(&self) -> Result<Vec<String>, anyhow::Error> {
         match &self {
             &DataType::Array { elements } => {
                 let mut result: Vec<String> = Vec::new();
@@ -476,7 +457,7 @@ impl DataType {
 
 fn parse_double(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
     let (line, new_pos) = parse_simple_line(input, position + 1)?;
-    let value: f64 = std::str::from_utf8(line)?.parse()?;
+    let value: f64 = from_utf8(line)?.parse()?;
     Ok((DataType::Double { value }, new_pos))
 }
 
@@ -492,7 +473,7 @@ fn parse_big_number(input: &[u8], position: usize) -> Result<(DataType, usize), 
 
 fn parse_integer(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
     let (line, new_pos) = parse_simple_line(input, position + 1)?;
-    let value: i64 = std::str::from_utf8(line)?.parse()?;
+    let value: i64 = from_utf8(line)?.parse()?;
     Ok((DataType::Integer { value }, new_pos))
 }
 
@@ -507,7 +488,7 @@ fn parse_bulk_string_or_rdb(input: &[u8], position: usize) -> Result<(DataType, 
     if length_bytes == b"-1" {
         return Ok((DataType::BulkString { value: None }, payload_start));
     }
-    let length: usize = std::str::from_utf8(length_bytes)?.parse()?;
+    let length: usize = from_utf8(length_bytes)?.parse()?;
     let payload_end = payload_start + length;
     if input.get(payload_end..payload_end + 2) == Some(b"\r\n") {
         Ok((DataType::BulkString { value: Some(input[payload_start..payload_end].to_vec()) }, payload_end + 2))
@@ -540,7 +521,7 @@ fn parse_simple_string(input: &[u8], position: usize) -> Result<(DataType, usize
 
 fn parse_map(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
     let (length_bytes, mut current_pos) = parse_simple_line(input, position + 1)?;
-    let count: i64 = std::str::from_utf8(length_bytes)?.parse()?;
+    let count: i64 = from_utf8(length_bytes)?.parse()?;
     let mut entries = Vec::new();
     for _ in 0..count {
         let (key, after_key) = DataType::parse(input, current_pos)?;
@@ -569,7 +550,7 @@ fn serialize_array_like(elements: &Vec<DataType>, prefix: u8) -> Vec<u8> {
 
 fn parse_array_like(input: &[u8], position: usize) -> Result<(Vec<DataType>, usize), anyhow::Error> {
     let (length_bytes, mut current_pos) = parse_simple_line(input, position + 1)?;
-    let count: i64 = std::str::from_utf8(length_bytes)?.parse()?;
+    let count: i64 = from_utf8(length_bytes)?.parse()?;
     let mut elements = Vec::new();
     for _ in 0..count {
         let (element, next_pos) = DataType::parse(input, current_pos)?;
@@ -1142,14 +1123,14 @@ mod tests {
                 DataType::SimpleString { value: "hello".as_bytes().to_vec() },
                 DataType::Integer { value: 42 },
             ]
-        }.as_array()?;
+        }.as_vec()?;
         assert_eq!(result, vec!["hello".to_string(), "42".to_string()]);
         Ok(())
     }
 
     #[test]
     fn should_wrap_non_array_as_single_element_array() -> Result<(), Box<dyn std::error::Error>> {
-        let result = DataType::SimpleString { value: "hello".as_bytes().to_vec() }.as_array()?;
+        let result = DataType::SimpleString { value: "hello".as_bytes().to_vec() }.as_vec()?;
         assert_eq!(result, vec!["hello".to_string()]);
         Ok(())
     }
@@ -1273,5 +1254,21 @@ mod tests {
         assert_eq!(null(), DataType::Null {});
         assert_eq!(boolean(true), DataType::Boolean { value: true });
         assert_eq!(boolean(false), DataType::Boolean { value: false });
+        assert_eq!(integer(42), DataType::Integer { value: 42 });
+        assert_eq!(integer(-7), DataType::Integer { value: -7 });
+        assert_eq!(simple_error("ERR bad"), DataType::SimpleError { value: b"ERR bad".to_vec() });
+        assert_eq!(bulk_error("ERR details"), DataType::BulkError { value: b"ERR details".to_vec() });
+        assert_eq!(big_number("349"), DataType::BigNumber { sign: b'+', value: b"349".to_vec() });
+        assert_eq!(big_number("+349"), DataType::BigNumber { sign: b'+', value: b"349".to_vec() });
+        assert_eq!(big_number("-349"), DataType::BigNumber { sign: b'-', value: b"349".to_vec() });
+        assert_eq!(verbatim_string("txt", "hello"), DataType::VerbatimString {
+            encoding: b"txt".to_vec(),
+            value: b"hello".to_vec(),
+        });
+        assert_eq!(map(vec![(integer(1), bulk_string("a"))]), DataType::Map {
+            entries: vec![(DataType::Integer { value: 1 }, DataType::BulkString { value: Some(b"a".to_vec()) })]
+        });
+        assert_eq!(set(vec![integer(1)]), DataType::Set { elements: vec![DataType::Integer { value: 1 }] });
+        assert_eq!(push(vec![integer(1)]), DataType::Push { elements: vec![DataType::Integer { value: 1 }] });
     }
 }
