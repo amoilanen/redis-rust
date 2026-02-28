@@ -1123,4 +1123,291 @@ mod tests {
         }]);
         Ok(())
     }
+
+    // read_message_from_bytes
+
+    #[test]
+    fn should_read_exactly_one_message() -> Result<(), Box<dyn std::error::Error>> {
+        let result = read_message_from_bytes("+OK\r\n".as_bytes())?;
+        assert_eq!(result, DataType::SimpleString { value: "OK".as_bytes().to_vec() });
+        Ok(())
+    }
+
+    #[test]
+    fn should_fail_read_message_from_bytes_when_multiple_messages() {
+        let err = read_message_from_bytes("+hello\r\n+world\r\n".as_bytes()).unwrap_err();
+        assert!(format!("{}", err).contains("Expected exactly 1 message"));
+    }
+
+    #[test]
+    fn should_fail_read_message_from_bytes_when_empty_input() {
+        let err = read_message_from_bytes("".as_bytes()).unwrap_err();
+        assert!(format!("{}", err).contains("Expected exactly 1 message"));
+    }
+
+    // as_string()
+
+    #[test]
+    fn should_convert_simple_string_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::SimpleString { value: "hello".as_bytes().to_vec() }.as_string()?, "hello");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_bulk_string_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::BulkString { value: Some("world".as_bytes().to_vec()) }.as_string()?, "world");
+        assert_eq!(DataType::BulkString { value: None }.as_string()?, "");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_integer_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::Integer { value: 42 }.as_string()?, "42");
+        assert_eq!(DataType::Integer { value: -7 }.as_string()?, "-7");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_double_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::Double { value: 1.5 }.as_string()?, "1.5");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_simple_error_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::SimpleError { value: "ERR bad".as_bytes().to_vec() }.as_string()?, "ERR bad");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_null_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::Null {}.as_string()?, "");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_boolean_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::Boolean { value: true }.as_string()?, "t");
+        assert_eq!(DataType::Boolean { value: false }.as_string()?, "f");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_big_number_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::BigNumber { sign: b'+', value: "12345".as_bytes().to_vec() }.as_string()?, "12345");
+        assert_eq!(DataType::BigNumber { sign: b'-', value: "12345".as_bytes().to_vec() }.as_string()?, "-12345");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_bulk_error_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::BulkError { value: "ERR details".as_bytes().to_vec() }.as_string()?, "ERR details");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_verbatim_string_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::VerbatimString {
+            encoding: "txt".as_bytes().to_vec(),
+            value: "hello".as_bytes().to_vec()
+        }.as_string()?, "hello");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_rdb_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::Rdb { value: "rdbdata".as_bytes().to_vec() }.as_string()?, "rdbdata");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_map_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        let result = DataType::Map {
+            entries: vec![
+                (
+                    DataType::SimpleString { value: "k1".as_bytes().to_vec() },
+                    DataType::SimpleString { value: "v1".as_bytes().to_vec() }
+                ),
+            ]
+        }.as_string()?;
+        assert_eq!(result, "k1:v1,");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_set_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        let result = DataType::Set {
+            elements: vec![
+                DataType::SimpleString { value: "a".as_bytes().to_vec() },
+                DataType::SimpleString { value: "b".as_bytes().to_vec() },
+            ]
+        }.as_string()?;
+        assert_eq!(result, "a,b,");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_array_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        let result = DataType::Array {
+            elements: vec![
+                DataType::Integer { value: 1 },
+                DataType::Integer { value: 2 },
+            ]
+        }.as_string()?;
+        assert_eq!(result, "1,2,");
+        Ok(())
+    }
+
+    #[test]
+    fn should_convert_push_to_string() -> Result<(), Box<dyn std::error::Error>> {
+        let result = DataType::Push {
+            elements: vec![
+                DataType::SimpleString { value: "msg".as_bytes().to_vec() },
+            ]
+        }.as_string()?;
+        assert_eq!(result, "msg,");
+        Ok(())
+    }
+
+    // as_array()
+
+    #[test]
+    fn should_convert_array_as_array() -> Result<(), Box<dyn std::error::Error>> {
+        let result = DataType::Array {
+            elements: vec![
+                DataType::SimpleString { value: "hello".as_bytes().to_vec() },
+                DataType::Integer { value: 42 },
+            ]
+        }.as_array()?;
+        assert_eq!(result, vec!["hello".to_string(), "42".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn should_wrap_non_array_as_single_element_array() -> Result<(), Box<dyn std::error::Error>> {
+        let result = DataType::SimpleString { value: "hello".as_bytes().to_vec() }.as_array()?;
+        assert_eq!(result, vec!["hello".to_string()]);
+        Ok(())
+    }
+
+    // Empty collections
+
+    #[test]
+    fn should_serialize_empty_map() {
+        assert_eq!(String::from_utf8_lossy(&DataType::Map { entries: vec![] }.serialize()), "%0\r\n");
+    }
+
+    #[test]
+    fn should_parse_empty_map() -> Result<(), Box<dyn std::error::Error>> {
+        let parsed = DataType::parse(&"%0\r\n".as_bytes().to_vec(), 0)?;
+        assert_eq!(parsed.0, DataType::Map { entries: vec![] });
+        assert_eq!(parsed.1, 4);
+        Ok(())
+    }
+
+    #[test]
+    fn should_serialize_empty_set() {
+        assert_eq!(String::from_utf8_lossy(&DataType::Set { elements: vec![] }.serialize()), "~0\r\n");
+    }
+
+    #[test]
+    fn should_parse_empty_set() -> Result<(), Box<dyn std::error::Error>> {
+        let parsed = DataType::parse(&"~0\r\n".as_bytes().to_vec(), 0)?;
+        assert_eq!(parsed.0, DataType::Set { elements: vec![] });
+        assert_eq!(parsed.1, 4);
+        Ok(())
+    }
+
+    #[test]
+    fn should_serialize_empty_push() {
+        assert_eq!(String::from_utf8_lossy(&DataType::Push { elements: vec![] }.serialize()), ">0\r\n");
+    }
+
+    #[test]
+    fn should_parse_empty_push() -> Result<(), Box<dyn std::error::Error>> {
+        let parsed = DataType::parse(&">0\r\n".as_bytes().to_vec(), 0)?;
+        assert_eq!(parsed.0, DataType::Push { elements: vec![] });
+        assert_eq!(parsed.1, 4);
+        Ok(())
+    }
+
+    // Nested structures
+
+    #[test]
+    fn should_parse_nested_array() -> Result<(), Box<dyn std::error::Error>> {
+        let parsed = DataType::parse(&"*2\r\n*1\r\n:1\r\n:2\r\n".as_bytes().to_vec(), 0)?;
+        assert_eq!(parsed.0, DataType::Array {
+            elements: vec![
+                DataType::Array {
+                    elements: vec![DataType::Integer { value: 1 }]
+                },
+                DataType::Integer { value: 2 }
+            ]
+        });
+        assert_eq!(parsed.1, 16);
+        Ok(())
+    }
+
+    // Non-zero parse position
+
+    #[test]
+    fn should_parse_at_non_zero_position() -> Result<(), Box<dyn std::error::Error>> {
+        let input = "+hello\r\n+world\r\n";
+        let result = DataType::parse(&input.as_bytes().to_vec(), 8)?;
+        assert_eq!(result, (DataType::SimpleString {
+            value: "world".as_bytes().to_vec()
+        }, 16));
+        Ok(())
+    }
+
+    // Error cases
+
+    #[test]
+    fn should_fail_parsing_at_position_past_end() {
+        let err = DataType::parse(&"".as_bytes().to_vec(), 0).unwrap_err();
+        assert!(format!("{}", err).contains("Could not read the next data type value"));
+    }
+
+    #[test]
+    fn should_fail_parsing_integer_with_non_numeric_value() {
+        let err = DataType::parse(&":abc\r\n".as_bytes().to_vec(), 0).unwrap_err();
+        assert!(format!("{}", err).contains("invalid digit found in string"));
+    }
+
+    #[test]
+    fn should_fail_parsing_double_with_non_numeric_value() {
+        let err = DataType::parse(&",foo\r\n".as_bytes().to_vec(), 0).unwrap_err();
+        assert!(format!("{}", err).contains("invalid float literal"));
+    }
+
+    #[test]
+    fn should_fail_parsing_verbatim_string_without_colon_separator() {
+        let err = DataType::parse(&"=3\r\ntxt\r\n".as_bytes().to_vec(), 0).unwrap_err();
+        assert!(format!("{}", err).contains("Invalid VerbatimString"));
+    }
+
+    // Rdb serialization
+
+    #[test]
+    fn should_serialize_rdb() {
+        assert_eq!(
+            String::from_utf8_lossy(&DataType::Rdb { value: "fake_rdb".as_bytes().to_vec() }.serialize()),
+            "$8\r\nfake_rdb"
+        );
+    }
+
+    // Constructor functions
+
+    #[test]
+    fn should_create_types_with_constructors() {
+        assert_eq!(double(1.5), DataType::Double { value: 1.5 });
+        assert_eq!(simple_string("hello"), DataType::SimpleString { value: "hello".as_bytes().to_vec() });
+        assert_eq!(bulk_string("hi"), DataType::BulkString { value: Some("hi".as_bytes().to_vec()) });
+        assert_eq!(bulk_string_from_bytes(b"hi".to_vec()), DataType::BulkString { value: Some(b"hi".to_vec()) });
+        assert_eq!(bulk_string_empty(), DataType::BulkString { value: None });
+        assert_eq!(array(vec![DataType::Null {}]), DataType::Array { elements: vec![DataType::Null {}] });
+        assert_eq!(null(), DataType::Null {});
+        assert_eq!(boolean(true), DataType::Boolean { value: true });
+        assert_eq!(boolean(false), DataType::Boolean { value: false });
+    }
 }
