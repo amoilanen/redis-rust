@@ -45,7 +45,7 @@ fn e2e_echo_returns_argument() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("ECHO"),
         echo_msg.clone(),
     ]);
-    let elements: Vec<protocol::DataType> = message.as_array()?
+    let elements: Vec<protocol::DataType> = message.as_vec()?
         .iter()
         .map(|s| protocol::bulk_string(s))
         .collect();
