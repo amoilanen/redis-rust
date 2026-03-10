@@ -6,17 +6,18 @@
 use std::sync::{Arc, Mutex};
 use log::*;
 use crate::protocol;
-use crate::storage;
+use crate::protocol::DataType;
+use crate::storage::Storage;
 use crate::error::RedisError;
 use super::RedisCommand;
 
 /// GET command implementation.
 pub struct Get {
-    pub message: protocol::DataType,
+    pub message: DataType,
 }
 
 impl RedisCommand for Get {
-    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_vec()?;
         let error = RedisError {
             message: "GET command should have one argument".to_string(),
@@ -56,11 +57,11 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn create_test_storage() -> Arc<Mutex<storage::Storage>> {
-        Arc::new(Mutex::new(storage::Storage::new(HashMap::new())))
+    fn create_test_storage() -> Arc<Mutex<Storage>> {
+        Arc::new(Mutex::new(Storage::new(HashMap::new())))
     }
 
-    fn insert_test_data(storage: &Arc<Mutex<storage::Storage>>, key: &str, value: &str) {
+    fn insert_test_data(storage: &Arc<Mutex<Storage>>, key: &str, value: &str) {
         let mut data = storage.lock().unwrap();
         let _ = data.set(key, value.as_bytes().to_vec(), None);
     }
@@ -159,7 +160,7 @@ mod tests {
 
         // Verify binary data is preserved
         match &result[0] {
-            protocol::DataType::BulkString { value: Some(v) } => {
+            DataType::BulkString { value: Some(v) } => {
                 assert_eq!(v, &binary_data);
             }
             _ => panic!("Expected bulk string with binary data"),

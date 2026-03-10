@@ -6,19 +6,20 @@
 
 use std::sync::{Arc, Mutex};
 use crate::protocol;
-use crate::storage;
-use crate::server_state;
+use crate::protocol::DataType;
+use crate::storage::Storage;
+use crate::server_state::ServerState;
 use crate::error::RedisError;
 use super::RedisCommand;
 
 /// INFO command implementation.
 pub struct Info {
-    pub message: protocol::DataType,
-    pub server_state: Arc<server_state::ServerState>,
+    pub message: DataType,
+    pub server_state: Arc<ServerState>,
 }
 
 impl RedisCommand for Info {
-    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_vec()?;
         let error = RedisError {
             message: "INFO command should have one argument".to_string(),
@@ -77,7 +78,7 @@ mod tests {
 
     #[test]
     fn test_info_replication_master() {
-        let server_state = Arc::new(server_state::ServerState::new(None, 6379));
+        let server_state = Arc::new(ServerState::new(None, 6379));
         let message = protocol::array(vec![
             protocol::bulk_string("INFO"),
             protocol::bulk_string("replication"),
@@ -87,7 +88,7 @@ mod tests {
             server_state,
         };
 
-        let storage = Arc::new(Mutex::new(storage::Storage::new(HashMap::new())));
+        let storage = Arc::new(Mutex::new(Storage::new(HashMap::new())));
         let result = cmd.execute(&storage).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -98,7 +99,7 @@ mod tests {
 
     #[test]
     fn test_info_replication_slave() {
-        let server_state = Arc::new(server_state::ServerState::new(Some("localhost 6379".to_owned()), 6380));
+        let server_state = Arc::new(ServerState::new(Some("localhost 6379".to_owned()), 6380));
         let message = protocol::array(vec![
             protocol::bulk_string("INFO"),
             protocol::bulk_string("replication"),
@@ -108,7 +109,7 @@ mod tests {
             server_state,
         };
 
-        let storage = Arc::new(Mutex::new(storage::Storage::new(HashMap::new())));
+        let storage = Arc::new(Mutex::new(Storage::new(HashMap::new())));
         let result = cmd.execute(&storage).unwrap();
 
         assert_eq!(result.len(), 1);

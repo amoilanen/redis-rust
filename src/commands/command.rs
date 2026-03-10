@@ -5,16 +5,17 @@
 
 use std::sync::{Arc, Mutex};
 use crate::protocol;
-use crate::storage;
+use crate::protocol::DataType;
+use crate::storage::Storage;
 use super::RedisCommand;
 
 /// COMMAND command implementation.
 pub struct Command {
-    pub message: protocol::DataType,
+    pub message: DataType,
 }
 
 impl RedisCommand for Command {
-    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
         // TODO: Should return the list of all the available commands and their documentation instead
         Ok(vec![protocol::simple_string("OK")])
     }
@@ -41,7 +42,7 @@ mod tests {
         let message = protocol::array(vec![protocol::bulk_string("COMMAND")]);
         let cmd = Command { message };
 
-        let storage = Arc::new(std::sync::Mutex::new(storage::Storage::new(
+        let storage = Arc::new(std::sync::Mutex::new(Storage::new(
             std::collections::HashMap::new(),
         )));
         let result = cmd.execute(&storage).unwrap();

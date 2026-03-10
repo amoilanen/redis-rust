@@ -9,6 +9,7 @@
 
 use codecrafters_redis::commands::*;
 use codecrafters_redis::protocol;
+use codecrafters_redis::protocol::DataType;
 use codecrafters_redis::storage::{Storage, StoredValue};
 use codecrafters_redis::server_state::ServerState;
 use std::collections::HashMap;
@@ -45,7 +46,7 @@ fn e2e_echo_returns_argument() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("ECHO"),
         echo_msg.clone(),
     ]);
-    let elements: Vec<protocol::DataType> = message.as_vec()?
+    let elements: Vec<DataType> = message.as_vec()?
         .iter()
         .map(|s| protocol::bulk_string(s))
         .collect();
@@ -285,7 +286,7 @@ fn e2e_binary_data_preserved() -> Result<(), Box<dyn Error>> {
     let result = cmd.execute(&storage)?;
 
     match &result[0] {
-        protocol::DataType::BulkString { value: Some(v) } => {
+        DataType::BulkString { value: Some(v) } => {
             assert_eq!(v, &binary_data);
         }
         _ => return Err("Expected bulk string".into()),

@@ -5,16 +5,17 @@
 
 use std::sync::{Arc, Mutex};
 use crate::protocol;
-use crate::storage;
+use crate::protocol::DataType;
+use crate::storage::Storage;
 use super::RedisCommand;
 
 /// PING command implementation.
 pub struct Ping {
-    pub message: protocol::DataType,
+    pub message: DataType,
 }
 
 impl RedisCommand for Ping {
-    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
         Ok(vec![protocol::simple_string("PONG")])
     }
 
@@ -40,7 +41,7 @@ mod tests {
         let message = protocol::array(vec![protocol::bulk_string("PING")]);
         let cmd = Ping { message };
 
-        let storage = Arc::new(std::sync::Mutex::new(storage::Storage::new(
+        let storage = Arc::new(std::sync::Mutex::new(Storage::new(
             std::collections::HashMap::new(),
         )));
         let result = cmd.execute(&storage).unwrap();

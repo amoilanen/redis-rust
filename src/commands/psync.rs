@@ -7,18 +7,19 @@ use std::sync::{Arc, Mutex};
 use anyhow::anyhow;
 use log::*;
 use crate::protocol;
-use crate::storage;
-use crate::server_state;
+use crate::protocol::DataType;
+use crate::storage::Storage;
+use crate::server_state::ServerState;
 use super::RedisCommand;
 
 /// PSYNC command implementation.
 pub struct PSync {
-    pub message: protocol::DataType,
-    pub server_state: Arc<server_state::ServerState>,
+    pub message: DataType,
+    pub server_state: Arc<ServerState>,
 }
 
 impl RedisCommand for PSync {
-    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
         let mut reply = Vec::new();
         let instructions: Vec<String> = self.message.as_vec()?;
 
@@ -49,7 +50,7 @@ impl RedisCommand for PSync {
             .lock()
             .map_err(|e| anyhow!("Failed to lock storage: {}", e))?
             .to_rdb()?;
-        reply.push(protocol::DataType::Rdb { value: rdb_bytes });
+        reply.push(DataType::Rdb { value: rdb_bytes });
 
         //TODO: In practice it would be OK to send this command, but it fails some test expectations on Codecrafters, commenting out temporarily
         //reply.push(protocol::array(vec![protocol::bulk_string("REPLCONF"), protocol::bulk_string("GETACK"), protocol::bulk_string("*")]));
@@ -77,7 +78,7 @@ mod tests {
 
     #[test]
     fn test_psync_returns_fullresync() {
-        let server_state = Arc::new(server_state::ServerState::new(None, 6379));
+        let server_state = Arc::new(ServerState::new(None, 6379));
         let message = protocol::array(vec![
             protocol::bulk_string("PSYNC"),
             protocol::bulk_string("?"),
@@ -88,7 +89,7 @@ mod tests {
             server_state,
         };
 
-        let storage = Arc::new(Mutex::new(storage::Storage::new(HashMap::new())));
+        let storage = Arc::new(Mutex::new(Storage::new(HashMap::new())));
         let result = cmd.execute(&storage).unwrap();
 
         assert_eq!(result.len(), 2);
@@ -97,7 +98,7 @@ mod tests {
 
         // Verify we got RDB
         match &result[1] {
-            protocol::DataType::Rdb { value: _ } => {
+            DataType::Rdb { value: _ } => {
                 // Expected
             }
             _ => panic!("Expected RDB data type"),

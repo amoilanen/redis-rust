@@ -5,11 +5,12 @@
 
 use std::io::Read;
 use crate::protocol;
+use crate::protocol::DataType;
 
 /// Size of the read buffer for TCP operations
 const BUFFER_SIZE: usize = 2048;
 
-pub fn read_messages<R: Read>(reader: &mut R) -> Result<Vec<protocol::DataType>, anyhow::Error> {
+pub fn read_messages<R: Read>(reader: &mut R) -> Result<Vec<DataType>, anyhow::Error> {
     if let Some(message_bytes) = read_bytes(reader)? {
         Ok(protocol::read_messages_from_bytes(&message_bytes)?)
     } else {
@@ -17,7 +18,7 @@ pub fn read_messages<R: Read>(reader: &mut R) -> Result<Vec<protocol::DataType>,
     }
 }
 
-pub fn read_single_message<R: Read>(reader: &mut R) -> Result<Option<protocol::DataType>, anyhow::Error> {
+pub fn read_single_message<R: Read>(reader: &mut R) -> Result<Option<DataType>, anyhow::Error> {
     let messages = read_messages(reader)?;
     match messages.len() {
         0 => Ok(None),

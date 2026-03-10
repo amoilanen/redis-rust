@@ -4,19 +4,19 @@
 /// Returns: The message back to the client
 
 use std::sync::{Arc, Mutex};
-use crate::protocol;
-use crate::storage;
+use crate::protocol::DataType;
+use crate::storage::Storage;
 use super::RedisCommand;
 
 /// ECHO command implementation.
 pub struct Echo {
-    pub message: protocol::DataType,
-    pub argument: Option<protocol::DataType>,
+    pub message: DataType,
+    pub argument: Option<DataType>,
 }
 
 impl RedisCommand for Echo {
-    fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
-        let mut reply: Vec<protocol::DataType> = Vec::new();
+    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+        let mut reply: Vec<DataType> = Vec::new();
         if let Some(echo_argument) = &self.argument {
             reply = vec![echo_argument.clone()];
         }
@@ -39,6 +39,7 @@ impl RedisCommand for Echo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol;
 
     #[test]
     fn test_echo_command_with_message() {
@@ -47,7 +48,7 @@ mod tests {
             protocol::bulk_string("ECHO"),
             echo_msg.clone(),
         ]);
-        let elements: Vec<protocol::DataType> = message.as_vec()
+        let elements: Vec<DataType> = message.as_vec()
             .unwrap()
             .iter()
             .map(|s| protocol::bulk_string(s))
@@ -58,7 +59,7 @@ mod tests {
             argument: Some(elements[1].clone()),
         };
 
-        let storage = Arc::new(std::sync::Mutex::new(storage::Storage::new(
+        let storage = Arc::new(std::sync::Mutex::new(Storage::new(
             std::collections::HashMap::new(),
         )));
         let result = cmd.execute(&storage).unwrap();
@@ -75,7 +76,7 @@ mod tests {
             argument: None,
         };
 
-        let storage = Arc::new(std::sync::Mutex::new(storage::Storage::new(
+        let storage = Arc::new(std::sync::Mutex::new(Storage::new(
             std::collections::HashMap::new(),
         )));
         let result = cmd.execute(&storage).unwrap();

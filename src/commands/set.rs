@@ -10,17 +10,18 @@ use std::sync::{Arc, Mutex};
 use anyhow::anyhow;
 use log::*;
 use crate::protocol;
-use crate::storage;
+use crate::protocol::DataType;
+use crate::storage::Storage;
 use crate::error::RedisError;
 use super::RedisCommand;
 
 /// SET command implementation.
 pub struct Set {
-    pub message: protocol::DataType,
+    pub message: DataType,
 }
 
 impl RedisCommand for Set {
-    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_vec()?;
         let error = RedisError {
             message: "Invalid SET command syntax".to_string(),
@@ -75,8 +76,8 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    fn create_test_storage() -> Arc<Mutex<storage::Storage>> {
-        Arc::new(Mutex::new(storage::Storage::new(HashMap::new())))
+    fn create_test_storage() -> Arc<Mutex<Storage>> {
+        Arc::new(Mutex::new(Storage::new(HashMap::new())))
     }
 
     #[test]

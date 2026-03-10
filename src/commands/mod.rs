@@ -4,8 +4,8 @@
 /// all available command implementations.
 
 use std::sync::{Arc, Mutex};
-use crate::protocol;
-use crate::storage;
+use crate::protocol::DataType;
+use crate::storage::Storage;
 
 pub mod echo;
 pub mod ping;
@@ -31,7 +31,7 @@ pub use psync::PSync;
 /// All Redis commands must implement this trait to be handled by the server.
 pub trait RedisCommand {
     /// Execute the command and return response(s) to send to the client.
-    fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error>;
+    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error>;
     
     /// Whether this command should be propagated to replica servers.
     fn is_propagated_to_replicas(&self) -> bool;
@@ -53,7 +53,7 @@ pub trait RedisCommand {
 ///
 /// # Errors
 /// Returns error if message cannot be converted to array
-pub fn parse_command_name(received_message: &protocol::DataType) -> Result<String, anyhow::Error> {
+pub fn parse_command_name(received_message: &DataType) -> Result<String, anyhow::Error> {
     let received_message_parts: Vec<String> = received_message.as_vec()?;
     let command_parts: Vec<&str> = received_message_parts.iter().map(|x| x.as_str()).collect();
     let command_name = command_parts.get(0).unwrap_or(&"").to_string();
@@ -63,6 +63,7 @@ pub fn parse_command_name(received_message: &protocol::DataType) -> Result<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol;
 
     #[test]
     fn test_parse_command_name_valid() {
