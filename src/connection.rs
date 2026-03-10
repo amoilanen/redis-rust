@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::protocol::DataType;
 use crate::io;
-use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Command, Info, ReplConf, PSync};
+use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Command, Info, ReplConf, PSync, RPush};
 use crate::storage::Storage;
 use crate::server_state::ServerState;
 
@@ -83,6 +83,10 @@ pub fn handle_connection(
                         command = Some(Box::new(ReplConf {
                             message: received_message.clone(),
                             server_state: Arc::clone(server_state),
+                        }));
+                    } else if command_name == "RPUSH" {
+                        command = Some(Box::new(RPush {
+                            message: received_message.clone()
                         }));
                     } else if command_name == "PSYNC" {
                         command = Some(Box::new(PSync {

@@ -15,6 +15,7 @@ pub mod get;
 pub mod info;
 pub mod replconf;
 pub mod psync;
+pub mod rpush;
 
 // Re-export all command types for convenience
 pub use echo::Echo;
@@ -25,6 +26,7 @@ pub use get::Get;
 pub use info::Info;
 pub use replconf::ReplConf;
 pub use psync::PSync;
+pub use rpush::RPush;
 
 /// Trait for implementing Redis commands.
 ///
