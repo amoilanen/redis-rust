@@ -32,3 +32,26 @@ Note: This section is for stages 2 and beyond.
    the first time you run it. Subsequent runs will be fast.
 1. Commit your changes and run `git push origin master` to submit your solution
    to CodeCrafters. Test output will be streamed to your terminal.
+
+# Running E2E Tests
+
+The project includes end-to-end tests in the `e2e/` directory that spin up real
+server processes and exercise the full TCP protocol. No extra dependencies are
+needed — everything is pure Rust.
+
+```sh
+# Run all E2E tests (basic commands + replication)
+cargo test --test e2e_basic_commands --test e2e_replication
+
+# Run only the basic-command tests (PING, ECHO, SET/GET, INFO, …)
+cargo test --test e2e_basic_commands
+
+# Run only the replication tests (master + 3 replicas)
+cargo test --test e2e_replication
+
+# Run a single test by name
+cargo test --test e2e_replication test_single_key_propagates
+```
+
+A manual testing guide with `redis-cli` walk-throughs is available at
+[`e2e/manual_testing.md`](e2e/manual_testing.md).
