@@ -15,12 +15,12 @@ use crate::server_state;
 use super::RedisCommand;
 
 /// REPLCONF command implementation.
-pub struct ReplConf<'a> {
-    pub message: &'a protocol::DataType,
-    pub server_state: &'a server_state::ServerState,
+pub struct ReplConf {
+    pub message: protocol::DataType,
+    pub server_state: Arc<server_state::ServerState>,
 }
 
-impl RedisCommand for ReplConf<'_> {
+impl RedisCommand for ReplConf {
     fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let mut reply = Vec::new();
         let instructions: Vec<String> = self.message.as_vec()?;
@@ -62,15 +62,15 @@ mod tests {
 
     #[test]
     fn test_replconf_listening_port() {
-        let server_state = server_state::ServerState::new(None, 6380);
+        let server_state = Arc::new(server_state::ServerState::new(None, 6380));
         let message = protocol::array(vec![
             protocol::bulk_string("REPLCONF"),
             protocol::bulk_string("listening-port"),
             protocol::bulk_string("6380"),
         ]);
         let cmd = ReplConf {
-            message: &message,
-            server_state: &server_state,
+            message,
+            server_state,
         };
 
         let storage = Arc::new(Mutex::new(storage::Storage::new(HashMap::new())));
@@ -83,15 +83,15 @@ mod tests {
 
     #[test]
     fn test_replconf_getack() {
-        let server_state = server_state::ServerState::new(None, 6379);
+        let server_state = Arc::new(server_state::ServerState::new(None, 6379));
         let message = protocol::array(vec![
             protocol::bulk_string("REPLCONF"),
             protocol::bulk_string("getack"),
             protocol::bulk_string("*"),
         ]);
         let cmd = ReplConf {
-            message: &message,
-            server_state: &server_state,
+            message,
+            server_state,
         };
 
         let storage = Arc::new(Mutex::new(storage::Storage::new(HashMap::new())));

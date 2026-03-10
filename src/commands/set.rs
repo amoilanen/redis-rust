@@ -15,11 +15,11 @@ use crate::error::RedisError;
 use super::RedisCommand;
 
 /// SET command implementation.
-pub struct Set<'a> {
-    pub message: &'a protocol::DataType,
+pub struct Set {
+    pub message: protocol::DataType,
 }
 
-impl RedisCommand for Set<'_> {
+impl RedisCommand for Set {
     fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_vec()?;
         let error = RedisError {
@@ -86,7 +86,7 @@ mod tests {
             protocol::bulk_string("key1"),
             protocol::bulk_string("value1"),
         ]);
-        let cmd = Set { message: &message };
+        let cmd = Set { message };
 
         let storage = create_test_storage();
         let result = cmd.execute(&storage)?;
@@ -111,7 +111,7 @@ mod tests {
             protocol::bulk_string("px"),
             protocol::bulk_string("100"),
         ]);
-        let cmd = Set { message: &message };
+        let cmd = Set { message };
 
         let storage = create_test_storage();
         let result = cmd.execute(&storage)?;
@@ -140,7 +140,7 @@ mod tests {
             protocol::bulk_string("SET"),
             protocol::bulk_string("key_only"),
         ]);
-        let cmd = Set { message: &message };
+        let cmd = Set { message };
 
         let storage = create_test_storage();
         let result = cmd.execute(&storage);

@@ -27,7 +27,7 @@ fn create_test_storage() -> Arc<Mutex<Storage>> {
 #[test]
 fn e2e_ping_works() -> Result<(), Box<dyn Error>> {
     let message = protocol::array(vec![protocol::bulk_string("PING")]);
-    let cmd = Ping { message: &message };
+    let cmd = Ping { message };
 
     let storage = create_test_storage();
     let result = cmd.execute(&storage)?;
@@ -51,8 +51,8 @@ fn e2e_echo_returns_argument() -> Result<(), Box<dyn Error>> {
         .collect();
 
     let cmd = Echo {
-        message: &message,
-        argument: Some(&elements[1]),
+        message,
+        argument: Some(elements[1].clone()),
     };
 
     let storage = create_test_storage();
@@ -74,7 +74,7 @@ fn e2e_set_get_basic() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("username"),
         protocol::bulk_string("alice"),
     ]);
-    let set_cmd = Set { message: &set_msg };
+    let set_cmd = Set { message: set_msg };
     let set_result = set_cmd.execute(&storage)?;
     assert_eq!(set_result[0].as_string()?, "OK");
 
@@ -83,7 +83,7 @@ fn e2e_set_get_basic() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("GET"),
         protocol::bulk_string("username"),
     ]);
-    let get_cmd = Get { message: &get_msg };
+    let get_cmd = Get { message: get_msg };
     let get_result = get_cmd.execute(&storage)?;
     assert_eq!(get_result[0].as_string()?, "alice");
     Ok(())
@@ -107,7 +107,7 @@ fn e2e_multiple_keys() -> Result<(), Box<dyn Error>> {
             protocol::bulk_string(key),
             protocol::bulk_string(value),
         ]);
-        let cmd = Set { message: &msg };
+        let cmd = Set { message: msg };
         cmd.execute(&storage)?;
     }
 
@@ -117,7 +117,7 @@ fn e2e_multiple_keys() -> Result<(), Box<dyn Error>> {
             protocol::bulk_string("GET"),
             protocol::bulk_string(key),
         ]);
-        let cmd = Get { message: &msg };
+        let cmd = Get { message: msg };
         let result = cmd.execute(&storage)?;
         assert_eq!(result[0].as_string()?, *expected_value);
     }
@@ -132,7 +132,7 @@ fn e2e_get_nonexistent_key() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("GET"),
         protocol::bulk_string("does_not_exist"),
     ]);
-    let cmd = Get { message: &msg };
+    let cmd = Get { message: msg };
     let result = cmd.execute(&storage)?;
 
     // Should return empty bulk string
@@ -150,14 +150,14 @@ fn e2e_overwrite_key() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("counter"),
         protocol::bulk_string("10"),
     ]);
-    Set { message: &msg1 }.execute(&storage)?;
+    Set { message: msg1 }.execute(&storage)?;
 
     // Get it
     let msg2 = protocol::array(vec![
         protocol::bulk_string("GET"),
         protocol::bulk_string("counter"),
     ]);
-    let result1 = Get { message: &msg2 }.execute(&storage)?;
+    let result1 = Get { message: msg2.clone() }.execute(&storage)?;
     assert_eq!(result1[0].as_string()?, "10");
 
     // Overwrite it
@@ -166,10 +166,10 @@ fn e2e_overwrite_key() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("counter"),
         protocol::bulk_string("20"),
     ]);
-    Set { message: &msg3 }.execute(&storage)?;
+    Set { message: msg3 }.execute(&storage)?;
 
     // Get new value
-    let result2 = Get { message: &msg2 }.execute(&storage)?;
+    let result2 = Get { message: msg2 }.execute(&storage)?;
     assert_eq!(result2[0].as_string()?, "20");
     Ok(())
 }
@@ -188,21 +188,21 @@ fn e2e_key_expires() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("px"),
         protocol::bulk_string("100"),
     ]);
-    Set { message: &msg }.execute(&storage)?;
+    Set { message: msg }.execute(&storage)?;
 
     // Should exist immediately
     let get_msg = protocol::array(vec![
         protocol::bulk_string("GET"),
         protocol::bulk_string("temp_key"),
     ]);
-    let result1 = Get { message: &get_msg }.execute(&storage)?;
+    let result1 = Get { message: get_msg.clone() }.execute(&storage)?;
     assert_eq!(result1[0].as_string()?, "temp_value");
 
     // Wait for expiration
     thread::sleep(Duration::from_millis(150));
 
     // Should be gone now
-    let result2 = Get { message: &get_msg }.execute(&storage)?;
+    let result2 = Get { message: get_msg }.execute(&storage)?;
     assert_eq!(result2[0].as_string()?, "");
     Ok(())
 }
@@ -219,21 +219,21 @@ fn e2e_key_expires_uppercase_px() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("PX"),
         protocol::bulk_string("100"),
     ]);
-    Set { message: &msg }.execute(&storage)?;
+    Set { message: msg }.execute(&storage)?;
 
     // Should exist immediately
     let get_msg = protocol::array(vec![
         protocol::bulk_string("GET"),
         protocol::bulk_string("blueberry"),
     ]);
-    let result1 = Get { message: &get_msg }.execute(&storage)?;
+    let result1 = Get { message: get_msg.clone() }.execute(&storage)?;
     assert_eq!(result1[0].as_string()?, "raspberry");
 
     // Wait for expiration
     thread::sleep(Duration::from_millis(150));
 
     // Should be gone now
-    let result2 = Get { message: &get_msg }.execute(&storage)?;
+    let result2 = Get { message: get_msg }.execute(&storage)?;
     assert_eq!(result2[0].as_string()?, "");
     Ok(())
 }
@@ -250,7 +250,7 @@ fn e2e_long_lived_key() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("px"),
         protocol::bulk_string("5000"),
     ]);
-    Set { message: &msg }.execute(&storage)?;
+    Set { message: msg }.execute(&storage)?;
 
     // Should still exist after 100ms
     thread::sleep(Duration::from_millis(100));
@@ -258,7 +258,7 @@ fn e2e_long_lived_key() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("GET"),
         protocol::bulk_string("session"),
     ]);
-    let result = Get { message: &get_msg }.execute(&storage)?;
+    let result = Get { message: get_msg }.execute(&storage)?;
     assert_eq!(result[0].as_string()?, "session_data");
     Ok(())
 }
@@ -281,7 +281,7 @@ fn e2e_binary_data_preserved() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("GET"),
         protocol::bulk_string("binary"),
     ]);
-    let cmd = Get { message: &msg };
+    let cmd = Get { message: msg };
     let result = cmd.execute(&storage)?;
 
     match &result[0] {
@@ -303,7 +303,7 @@ fn e2e_set_missing_value_fails() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("SET"),
         protocol::bulk_string("key_only"),
     ]);
-    let cmd = Set { message: &msg };
+    let cmd = Set { message: msg };
     let result = cmd.execute(&storage);
 
     assert!(result.is_err());
@@ -317,7 +317,7 @@ fn e2e_get_missing_key_fails() -> Result<(), Box<dyn Error>> {
     let msg = protocol::array(vec![
         protocol::bulk_string("GET"),
     ]);
-    let cmd = Get { message: &msg };
+    let cmd = Get { message: msg };
     let result = cmd.execute(&storage);
 
     assert!(result.is_err());
@@ -328,14 +328,14 @@ fn e2e_get_missing_key_fails() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn e2e_info_command_master() -> Result<(), Box<dyn Error>> {
-    let server_state = ServerState::new(None, 6379);
+    let server_state = Arc::new(ServerState::new(None, 6379));
     let msg = protocol::array(vec![
         protocol::bulk_string("INFO"),
         protocol::bulk_string("replication"),
     ]);
     let cmd = Info {
-        message: &msg,
-        server_state: &server_state,
+        message: msg,
+        server_state,
     };
 
     let storage = create_test_storage();
@@ -350,14 +350,14 @@ fn e2e_info_command_master() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn e2e_info_command_replica() -> Result<(), Box<dyn Error>> {
-    let server_state = ServerState::new(Some("localhost 6379".to_owned()), 6380);
+    let server_state = Arc::new(ServerState::new(Some("localhost 6379".to_owned()), 6380));
     let msg = protocol::array(vec![
         protocol::bulk_string("INFO"),
         protocol::bulk_string("replication"),
     ]);
     let cmd = Info {
-        message: &msg,
-        server_state: &server_state,
+        message: msg,
+        server_state,
     };
 
     let storage = create_test_storage();
@@ -387,7 +387,7 @@ fn e2e_mixed_operations() -> Result<(), Box<dyn Error>> {
             protocol::bulk_string(key),
             protocol::bulk_string(value),
         ]);
-        Set { message: &msg }.execute(&storage)?;
+        Set { message: msg }.execute(&storage)?;
     }
 
     // 2. Get and verify
@@ -396,7 +396,7 @@ fn e2e_mixed_operations() -> Result<(), Box<dyn Error>> {
             protocol::bulk_string("GET"),
             protocol::bulk_string(key),
         ]);
-        let result = Get { message: &msg }.execute(&storage)?;
+        let result = Get { message: msg }.execute(&storage)?;
         assert_eq!(result[0].as_string()?, *expected_value);
     }
 
@@ -406,14 +406,14 @@ fn e2e_mixed_operations() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("cache:config:timeout"),
         protocol::bulk_string("60000"),
     ]);
-    Set { message: &msg }.execute(&storage)?;
+    Set { message: msg }.execute(&storage)?;
 
     // 4. Verify update
     let msg = protocol::array(vec![
         protocol::bulk_string("GET"),
         protocol::bulk_string("cache:config:timeout"),
     ]);
-    let result = Get { message: &msg }.execute(&storage)?;
+    let result = Get { message: msg }.execute(&storage)?;
     assert_eq!(result[0].as_string()?, "60000");
 
     // 5. Test nonexistent
@@ -421,7 +421,7 @@ fn e2e_mixed_operations() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("GET"),
         protocol::bulk_string("cache:nonexistent"),
     ]);
-    let result = Get { message: &msg }.execute(&storage)?;
+    let result = Get { message: msg }.execute(&storage)?;
     assert_eq!(result[0].as_string()?, "");
     Ok(())
 }
@@ -443,19 +443,19 @@ fn e2e_session_simulation() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("px"),
         protocol::bulk_string(&expiry_ms.to_string()),
     ]);
-    Set { message: &msg }.execute(&storage)?;
+    Set { message: msg }.execute(&storage)?;
 
     // Retrieve session
-    let msg = protocol::array(vec![
+    let get_msg = protocol::array(vec![
         protocol::bulk_string("GET"),
         protocol::bulk_string(session_id),
     ]);
-    let result = Get { message: &msg }.execute(&storage)?;
+    let result = Get { message: get_msg.clone() }.execute(&storage)?;
     assert_eq!(result[0].as_string()?, user_id);
 
     // Session should still be valid after 100ms
     thread::sleep(Duration::from_millis(100));
-    let result = Get { message: &msg }.execute(&storage)?;
+    let result = Get { message: get_msg }.execute(&storage)?;
     assert_eq!(result[0].as_string()?, user_id);
     Ok(())
 }
@@ -476,14 +476,14 @@ fn e2e_user_profile_caching() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("px"),
         protocol::bulk_string("600000"), // 10 minutes
     ]);
-    Set { message: &msg }.execute(&storage)?;
+    Set { message: msg }.execute(&storage)?;
 
     // Retrieve user profile
     let msg = protocol::array(vec![
         protocol::bulk_string("GET"),
         protocol::bulk_string(&format!("profile:{}", user_id)),
     ]);
-    let result = Get { message: &msg }.execute(&storage)?;
+    let result = Get { message: msg }.execute(&storage)?;
     assert_eq!(result[0].as_string()?, profile_json);
     Ok(())
 }
@@ -505,7 +505,7 @@ fn e2e_rate_limiting_with_expiration() -> Result<(), Box<dyn Error>> {
             protocol::bulk_string("px"),
             protocol::bulk_string("60000"),
         ]);
-        Set { message: &msg }.execute(&storage)?;
+        Set { message: msg }.execute(&storage)?;
     }
 
     // Verify final count
@@ -513,7 +513,7 @@ fn e2e_rate_limiting_with_expiration() -> Result<(), Box<dyn Error>> {
         protocol::bulk_string("GET"),
         protocol::bulk_string(&rate_limit_key),
     ]);
-    let result = Get { message: &msg }.execute(&storage)?;
+    let result = Get { message: msg }.execute(&storage)?;
     assert_eq!(result[0].as_string()?, "3");
     Ok(())
 }

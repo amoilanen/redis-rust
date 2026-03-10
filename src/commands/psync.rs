@@ -12,12 +12,12 @@ use crate::server_state;
 use super::RedisCommand;
 
 /// PSYNC command implementation.
-pub struct PSync<'a> {
-    pub message: &'a protocol::DataType,
-    pub server_state: &'a server_state::ServerState,
+pub struct PSync {
+    pub message: protocol::DataType,
+    pub server_state: Arc<server_state::ServerState>,
 }
 
-impl RedisCommand for PSync<'_> {
+impl RedisCommand for PSync {
     fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let mut reply = Vec::new();
         let instructions: Vec<String> = self.message.as_vec()?;
@@ -77,15 +77,15 @@ mod tests {
 
     #[test]
     fn test_psync_returns_fullresync() {
-        let server_state = server_state::ServerState::new(None, 6379);
+        let server_state = Arc::new(server_state::ServerState::new(None, 6379));
         let message = protocol::array(vec![
             protocol::bulk_string("PSYNC"),
             protocol::bulk_string("?"),
             protocol::bulk_string("-1"),
         ]);
         let cmd = PSync {
-            message: &message,
-            server_state: &server_state,
+            message,
+            server_state,
         };
 
         let storage = Arc::new(Mutex::new(storage::Storage::new(HashMap::new())));

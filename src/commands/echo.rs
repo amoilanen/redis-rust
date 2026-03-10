@@ -9,15 +9,15 @@ use crate::storage;
 use super::RedisCommand;
 
 /// ECHO command implementation.
-pub struct Echo<'a> {
-    pub message: &'a protocol::DataType,
-    pub argument: Option<&'a protocol::DataType>,
+pub struct Echo {
+    pub message: protocol::DataType,
+    pub argument: Option<protocol::DataType>,
 }
 
-impl RedisCommand for Echo<'_> {
+impl RedisCommand for Echo {
     fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let mut reply: Vec<protocol::DataType> = Vec::new();
-        if let Some(echo_argument) = self.argument {
+        if let Some(echo_argument) = &self.argument {
             reply = vec![echo_argument.clone()];
         }
         Ok(reply)
@@ -54,8 +54,8 @@ mod tests {
             .collect();
 
         let cmd = Echo {
-            message: &message,
-            argument: Some(&elements[1]),
+            message,
+            argument: Some(elements[1].clone()),
         };
 
         let storage = Arc::new(std::sync::Mutex::new(storage::Storage::new(
@@ -71,7 +71,7 @@ mod tests {
     fn test_echo_command_without_message() {
         let message = protocol::array(vec![protocol::bulk_string("ECHO")]);
         let cmd = Echo {
-            message: &message,
+            message,
             argument: None,
         };
 

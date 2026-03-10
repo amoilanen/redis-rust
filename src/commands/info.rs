@@ -12,12 +12,12 @@ use crate::error::RedisError;
 use super::RedisCommand;
 
 /// INFO command implementation.
-pub struct Info<'a> {
-    pub message: &'a protocol::DataType,
-    pub server_state: &'a server_state::ServerState,
+pub struct Info {
+    pub message: protocol::DataType,
+    pub server_state: Arc<server_state::ServerState>,
 }
 
-impl RedisCommand for Info<'_> {
+impl RedisCommand for Info {
     fn execute(&self, _: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_vec()?;
         let error = RedisError {
@@ -77,14 +77,14 @@ mod tests {
 
     #[test]
     fn test_info_replication_master() {
-        let server_state = server_state::ServerState::new(None, 6379);
+        let server_state = Arc::new(server_state::ServerState::new(None, 6379));
         let message = protocol::array(vec![
             protocol::bulk_string("INFO"),
             protocol::bulk_string("replication"),
         ]);
         let cmd = Info {
-            message: &message,
-            server_state: &server_state,
+            message,
+            server_state,
         };
 
         let storage = Arc::new(Mutex::new(storage::Storage::new(HashMap::new())));
@@ -98,14 +98,14 @@ mod tests {
 
     #[test]
     fn test_info_replication_slave() {
-        let server_state = server_state::ServerState::new(Some("localhost 6379".to_owned()), 6380);
+        let server_state = Arc::new(server_state::ServerState::new(Some("localhost 6379".to_owned()), 6380));
         let message = protocol::array(vec![
             protocol::bulk_string("INFO"),
             protocol::bulk_string("replication"),
         ]);
         let cmd = Info {
-            message: &message,
-            server_state: &server_state,
+            message,
+            server_state,
         };
 
         let storage = Arc::new(Mutex::new(storage::Storage::new(HashMap::new())));

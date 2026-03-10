@@ -11,11 +11,11 @@ use crate::error::RedisError;
 use super::RedisCommand;
 
 /// GET command implementation.
-pub struct Get<'a> {
-    pub message: &'a protocol::DataType,
+pub struct Get {
+    pub message: protocol::DataType,
 }
 
-impl RedisCommand for Get<'_> {
+impl RedisCommand for Get {
     fn execute(&self, storage: &Arc<Mutex<storage::Storage>>) -> Result<Vec<protocol::DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_vec()?;
         let error = RedisError {
@@ -74,7 +74,7 @@ mod tests {
             protocol::bulk_string("GET"),
             protocol::bulk_string("mykey"),
         ]);
-        let cmd = Get { message: &message };
+        let cmd = Get { message };
 
         let result = cmd.execute(&storage).unwrap();
 
@@ -89,7 +89,7 @@ mod tests {
             protocol::bulk_string("GET"),
             protocol::bulk_string("nonexistent"),
         ]);
-        let cmd = Get { message: &message };
+        let cmd = Get { message };
 
         let storage = create_test_storage();
         let result = cmd.execute(&storage).unwrap();
@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn test_get_command_invalid_syntax() {
         let message = protocol::array(vec![protocol::bulk_string("GET")]);
-        let cmd = Get { message: &message };
+        let cmd = Get { message };
 
         let storage = create_test_storage();
         let result = cmd.execute(&storage);
@@ -120,7 +120,7 @@ mod tests {
             protocol::bulk_string("test_value"),
         ]);
         let set_cmd = super::super::set::Set {
-            message: &set_message,
+            message: set_message,
         };
         let set_result = set_cmd.execute(&storage).unwrap();
         assert_eq!(set_result[0].as_string().unwrap(), "OK");
@@ -131,7 +131,7 @@ mod tests {
             protocol::bulk_string("test_key"),
         ]);
         let get_cmd = Get {
-            message: &get_message,
+            message: get_message,
         };
         let get_result = get_cmd.execute(&storage).unwrap();
         assert_eq!(get_result[0].as_string().unwrap(), "test_value");
@@ -153,7 +153,7 @@ mod tests {
             protocol::bulk_string("binary_key"),
         ]);
         let get_cmd = Get {
-            message: &get_message,
+            message: get_message,
         };
         let result = get_cmd.execute(&storage).unwrap();
 
@@ -182,7 +182,7 @@ mod tests {
                 protocol::bulk_string(&format!("key{}", i)),
             ]);
             let get_cmd = Get {
-                message: &get_message,
+                message: get_message,
             };
             let result = get_cmd.execute(&storage).unwrap();
             assert_eq!(result[0].as_string().unwrap(), format!("value{}", i));

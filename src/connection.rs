@@ -55,39 +55,39 @@ pub fn handle_connection(
                     // Dispatch to appropriate command handler
                     if command_name == "ECHO" {
                         command = Some(Box::new(commands::Echo {
-                            message: &received_message,
-                            argument: elements.get(1),
+                            message: received_message.clone(),
+                            argument: elements.get(1).cloned(),
                         }));
                     } else if command_name == "PING" {
                         command = Some(Box::new(commands::Ping {
-                            message: &received_message,
+                            message: received_message.clone(),
                         }));
                     } else if command_name == "SET" {
                         command = Some(Box::new(commands::Set {
-                            message: &received_message,
+                            message: received_message.clone(),
                         }));
                     } else if command_name == "GET" {
                         command = Some(Box::new(commands::Get {
-                            message: &received_message,
+                            message: received_message.clone(),
                         }));
                     } else if command_name == "COMMAND" {
                         command = Some(Box::new(commands::Command {
-                            message: &received_message,
+                            message: received_message.clone(),
                         }));
                     } else if command_name == "INFO" {
                         command = Some(Box::new(commands::Info {
-                            message: &received_message,
-                            server_state,
+                            message: received_message.clone(),
+                            server_state: Arc::clone(server_state),
                         }));
                     } else if command_name == "REPLCONF" {
                         command = Some(Box::new(commands::ReplConf {
-                            message: &received_message,
-                            server_state,
+                            message: received_message.clone(),
+                            server_state: Arc::clone(server_state),
                         }));
                     } else if command_name == "PSYNC" {
                         command = Some(Box::new(commands::PSync {
-                            message: &received_message,
-                            server_state,
+                            message: received_message.clone(),
+                            server_state: Arc::clone(server_state),
                         }));
                         server_state
                             .replica_connections
