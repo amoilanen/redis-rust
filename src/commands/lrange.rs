@@ -24,9 +24,9 @@ pub struct LRange {
 }
 
 impl RedisCommand for LRange {
-    //TODO: Add tests
-    //TODO: Extract commonalities with rpush
+
     //TODO: Add handling of this command to the main connection handling loop
+    //TODO: Extract commonalities with rpush
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_vec()?;
         let error = RedisError {
@@ -38,7 +38,8 @@ impl RedisCommand for LRange {
             return Err(error.clone().into());
         }
         let start_index: usize = instructions.get(2).ok_or::<anyhow::Error>(error.clone().into())?.parse()?;
-        let end_index: usize = instructions.get(3).ok_or::<anyhow::Error>(error.clone().into())?.parse()?;
+        let mut end_index: usize = instructions.get(3).ok_or::<anyhow::Error>(error.clone().into())?.parse()?;
+        end_index = end_index + 1;
 
         debug!("LRANGE {} {} {}", key, start_index, end_index);
 
@@ -57,7 +58,7 @@ impl RedisCommand for LRange {
             },
             Some(_) => Err(anyhow!("Not an Array is stored in storage")),
         }?;
-        let selected_elements = stored_elements.get(start_index..end_index).map(|s| s.to_vec()).unwrap_or(Vec::new());
+        let selected_elements = stored_elements.get(start_index.max(0)..end_index.min(stored_elements.len())).map(|s| s.to_vec()).unwrap_or(Vec::new());
       Ok(selected_elements)
     }
 
@@ -83,27 +84,109 @@ mod tests {
         Arc::new(Mutex::new(Storage::new(HashMap::new())))
     }
 
+    fn set_list_values(storage: &Arc<Mutex<Storage>>, key: &str, elements: &[DataType]) -> anyhow::Result<()> {
+        storage.lock().unwrap().set(key, protocol::array(elements.to_vec().clone()).serialize(), None)?;
+        Ok(())
+    }
+
+    fn lrange(key: &str, start_index: usize, end_index: usize) -> LRange {
+        let msg = protocol::array(vec![
+            protocol::bulk_string("LRANGE"),
+            protocol::bulk_string(key),
+            protocol::integer(start_index as i64),
+            protocol::integer(end_index as i64),
+        ]);
+        LRange { message: msg }
+    }
+
     #[test]
-    fn test_lpush_selects_elements() -> anyhow::Result<()> {
+    fn test_lrange_selects_elements() -> anyhow::Result<()> {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["value1", "value2", "value3", "value4", "value5"];
         let elements: Vec<DataType> = values.iter().map(|s| protocol::simple_string(s)).collect();
-        storage.lock().unwrap().set(key, protocol::array(elements.clone()).serialize(), None)?;
+        set_list_values(&storage, key, &elements)?;
 
         let start_index = 1;
         let end_index = 3;
-        let msg = protocol::array(vec![
-            protocol::bulk_string("LRANGE"),
-            protocol::bulk_string("mylist"),
-            protocol::integer(start_index),
-            protocol::integer(end_index),
-        ]);
-        let cmd = LRange { message: msg };
+        let result = lrange(key, start_index, end_index).execute(&storage)?;
 
-        let result = cmd.execute(&storage)?;
+        assert_eq!(&result, &elements[start_index..end_index + 1]);
+        Ok(())
+    }
 
-        assert_eq!(&result, &elements[1..3]);
+
+    #[test]
+    fn test_lrange_with_start_index_larger_than_length() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let key = "mylist";
+        let values = vec!["value1", "value2", "value3", "value4", "value5"];
+        let elements: Vec<DataType> = values.iter().map(|s| protocol::simple_string(s)).collect();
+        set_list_values(&storage, key, &elements)?;
+
+        let start_index = values.len() + 1;
+        let end_index = start_index + 1;
+        let result = lrange(key, start_index, end_index).execute(&storage)?;
+
+        assert!(&result.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_lrange_stop_index_larger_than_length() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let key = "mylist";
+        let values = vec!["value1", "value2", "value3", "value4", "value5"];
+        let elements: Vec<DataType> = values.iter().map(|s| protocol::simple_string(s)).collect();
+        set_list_values(&storage, key, &elements)?;
+
+        let start_index = 2;
+        let end_index = values.len() + 1;
+        let result = lrange(key, start_index, end_index).execute(&storage)?;
+
+        assert_eq!(&result, &elements[start_index..]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_lrange_start_greater_than_stop() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let key = "mylist";
+        let values = vec!["value1", "value2", "value3", "value4", "value5"];
+        let elements: Vec<DataType> = values.iter().map(|s| protocol::simple_string(s)).collect();
+        set_list_values(&storage, key, &elements)?;
+
+        let start_index = 3;
+        let end_index = 2;
+        let result = lrange(key, start_index, end_index).execute(&storage)?;
+
+        assert!(&result.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_lrange_empty_list() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let key = "mylist";
+        set_list_values(&storage, key, &Vec::new())?;
+
+        let start_index = 1;
+        let end_index = 2;
+        let result = lrange(key, start_index, end_index).execute(&storage)?;
+
+        assert!(&result.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_lrange_non_existing_list() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let key = "mylist";
+        let start_index = 1;
+        let end_index = 2;
+        let result = lrange(key, start_index, end_index).execute(&storage)?;
+
+        assert!(&result.is_empty());
         Ok(())
     }
 }

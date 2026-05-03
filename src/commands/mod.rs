@@ -28,6 +28,7 @@ pub use info::Info;
 pub use replconf::ReplConf;
 pub use psync::PSync;
 pub use rpush::RPush;
+pub use lrange::LRange;
 
 /// Trait for implementing Redis commands.
 ///
