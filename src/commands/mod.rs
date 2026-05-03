@@ -16,6 +16,7 @@ pub mod info;
 pub mod replconf;
 pub mod psync;
 pub mod rpush;
+pub mod lrange;
 
 // Re-export all command types for convenience
 pub use echo::Echo;
