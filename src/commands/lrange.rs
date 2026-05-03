@@ -59,7 +59,7 @@ impl RedisCommand for LRange {
             Some(_) => Err(anyhow!("Not an Array is stored in storage")),
         }?;
         let selected_elements = stored_elements.get(start_index.max(0)..end_index.min(stored_elements.len())).map(|s| s.to_vec()).unwrap_or(Vec::new());
-      Ok(selected_elements)
+      Ok(vec![protocol::array(selected_elements)])
     }
 
     fn is_propagated_to_replicas(&self) -> bool {
@@ -111,7 +111,7 @@ mod tests {
         let end_index = 3;
         let result = lrange(key, start_index, end_index).execute(&storage)?;
 
-        assert_eq!(&result, &elements[start_index..end_index + 1]);
+        assert_eq!(&result[0], &protocol::array(elements[start_index..end_index + 1].to_vec()));
         Ok(())
     }
 
@@ -128,7 +128,7 @@ mod tests {
         let end_index = start_index + 1;
         let result = lrange(key, start_index, end_index).execute(&storage)?;
 
-        assert!(&result.is_empty());
+        assert_eq!(&result[0], &protocol::array(Vec::new()));
         Ok(())
     }
 
@@ -144,7 +144,7 @@ mod tests {
         let end_index = values.len() + 1;
         let result = lrange(key, start_index, end_index).execute(&storage)?;
 
-        assert_eq!(&result, &elements[start_index..]);
+        assert_eq!(&result[0], &protocol::array(elements[start_index..].to_vec()));
         Ok(())
     }
 
@@ -160,7 +160,7 @@ mod tests {
         let end_index = 2;
         let result = lrange(key, start_index, end_index).execute(&storage)?;
 
-        assert!(&result.is_empty());
+        assert_eq!(&result[0], &protocol::array(Vec::new()));
         Ok(())
     }
 
@@ -174,7 +174,7 @@ mod tests {
         let end_index = 2;
         let result = lrange(key, start_index, end_index).execute(&storage)?;
 
-        assert!(&result.is_empty());
+        assert_eq!(&result[0], &protocol::array(Vec::new()));
         Ok(())
     }
 
@@ -186,7 +186,7 @@ mod tests {
         let end_index = 2;
         let result = lrange(key, start_index, end_index).execute(&storage)?;
 
-        assert!(&result.is_empty());
+        assert_eq!(&result[0], &protocol::array(Vec::new()));
         Ok(())
     }
 }
