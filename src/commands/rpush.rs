@@ -55,7 +55,7 @@ impl RedisCommand for RPush {
             Some(_) => Err(anyhow!("Not an Array is stored in storage")),
         }?;
         for value in values {
-            stored_elements.push(protocol::simple_string(value));
+            stored_elements.push(protocol::bulk_string(value));
         }
         data.set(key, protocol::array(stored_elements.clone()).serialize(), None)?;
         Ok(vec![protocol::integer(stored_elements.len() as i64)])
