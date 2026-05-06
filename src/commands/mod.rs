@@ -6,6 +6,8 @@
 use std::sync::{Arc, Mutex};
 use crate::protocol::DataType;
 use crate::storage::Storage;
+use anyhow::anyhow;
+use crate::protocol;
 
 pub mod echo;
 pub mod ping;
@@ -45,6 +47,27 @@ pub trait RedisCommand {
     
     /// Serialize this command to its RESP protocol representation.
     fn serialize(&self) -> Vec<u8>;
+}
+
+trait ListCommand {
+    fn get_stored_elements(&self, key: &str, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+        let mut data = storage
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
+
+        let stored_raw_value = data.get(key)?;
+        let stored_value = stored_raw_value.map(|value| protocol::read_message_from_bytes(&value)).transpose()?;
+        let stored_elements = match stored_value {
+            Some(DataType::Array { elements }) => {
+                Ok(elements)
+            },
+            None => {
+                Ok(Vec::new())
+            },
+            Some(_) => Err(anyhow!("Not an Array is stored in storage")),
+        }?;
+        Ok(stored_elements)
+    }
 }
 
 /// Parses the command name from a received message.

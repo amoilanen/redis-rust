@@ -17,7 +17,7 @@ use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 use crate::error::RedisError;
-use super::RedisCommand;
+use super::{RedisCommand, ListCommand};
 
 /// RPUSH command implementation.
 pub struct RPush {
@@ -39,24 +39,13 @@ impl RedisCommand for RPush {
 
         debug!("RPUSH {} {:?}", key, values);
 
-        let mut data = storage
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
-
-        let stored_raw_value = data.get(key)?;
-        let stored_value = stored_raw_value.map(|value| protocol::read_message_from_bytes(&value)).transpose()?;
-        let mut stored_elements = match stored_value {
-            Some(DataType::Array { elements }) => {
-                Ok(elements)
-            },
-            None => {
-                Ok(Vec::new())
-            },
-            Some(_) => Err(anyhow!("Not an Array is stored in storage")),
-        }?;
+        let mut stored_elements = self.get_stored_elements(key, storage)?;
         for value in values {
             stored_elements.push(protocol::bulk_string(value));
         }
+        let mut data = storage
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
         data.set(key, protocol::array(stored_elements.clone()).serialize(), None)?;
         Ok(vec![protocol::integer(stored_elements.len() as i64)])
     }
@@ -73,6 +62,8 @@ impl RedisCommand for RPush {
         self.message.serialize()
     }
 }
+
+impl ListCommand for RPush {}
 
 #[cfg(test)]
 mod tests {

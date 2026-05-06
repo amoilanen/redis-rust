@@ -10,13 +10,12 @@
 ///   Returns an error if the value stored at key is not a list
 
 use std::sync::{Arc, Mutex};
-use anyhow::anyhow;
 use log::*;
 use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 use crate::error::RedisError;
-use super::RedisCommand;
+use super::{RedisCommand, ListCommand};
 
 /// LRANGE command implementation.
 pub struct LRange {
@@ -25,8 +24,6 @@ pub struct LRange {
 
 impl RedisCommand for LRange {
 
-    //TODO: Add handling of this command to the main connection handling loop
-    //TODO: Extract commonalities with rpush
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_vec()?;
         let error = RedisError {
@@ -43,21 +40,7 @@ impl RedisCommand for LRange {
 
         debug!("LRANGE {} {} {}", key, start_index, end_index);
 
-        let mut data = storage
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
-
-        let stored_raw_value = data.get(key)?;
-        let stored_value = stored_raw_value.map(|value| protocol::read_message_from_bytes(&value)).transpose()?;
-        let stored_elements = match stored_value {
-            Some(DataType::Array { elements }) => {
-                Ok(elements)
-            },
-            None => {
-                Ok(Vec::new())
-            },
-            Some(_) => Err(anyhow!("Not an Array is stored in storage")),
-        }?;
+        let stored_elements = self.get_stored_elements(key, storage)?;
         let selected_elements = stored_elements.get(start_index.max(0)..end_index.min(stored_elements.len())).map(|s| s.to_vec()).unwrap_or(Vec::new());
       Ok(vec![protocol::array(selected_elements)])
     }
@@ -74,6 +57,8 @@ impl RedisCommand for LRange {
         self.message.serialize()
     }
 }
+
+impl ListCommand for LRange {}
 
 #[cfg(test)]
 mod tests {
