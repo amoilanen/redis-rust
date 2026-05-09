@@ -17,7 +17,7 @@ use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 use crate::error::RedisError;
-use super::{RedisCommand, ListCommand};
+use super::{ RedisCommand, update_list_elements };
 
 /// RPUSH command implementation.
 pub struct RPush {
@@ -39,15 +39,13 @@ impl RedisCommand for RPush {
 
         debug!("RPUSH {} {:?}", key, values);
 
-        let mut stored_elements = self.get_stored_elements(key, storage)?;
-        for value in values {
-            stored_elements.push(protocol::bulk_string(value));
-        }
-        let mut data = storage
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
-        data.set(key, protocol::array(stored_elements.clone()).serialize(), None)?;
-        Ok(vec![protocol::integer(stored_elements.len() as i64)])
+        let updated_elements = update_list_elements(key, storage, |elements| {
+            for value in values {
+                elements.push(protocol::bulk_string(value));
+            }
+            Ok(())
+        })?;
+        Ok(vec![protocol::integer(updated_elements.len() as i64)])
     }
 
     fn is_propagated_to_replicas(&self) -> bool {
@@ -62,8 +60,6 @@ impl RedisCommand for RPush {
         self.message.serialize()
     }
 }
-
-impl ListCommand for RPush {}
 
 #[cfg(test)]
 mod tests {

@@ -49,25 +49,43 @@ pub trait RedisCommand {
     fn serialize(&self) -> Vec<u8>;
 }
 
-trait ListCommand {
-    fn get_stored_elements(&self, key: &str, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
-        let mut data = storage
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
+fn get_list_elements(key: &str, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    let mut data = storage
+        .lock()
+        .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
+    let stored_raw_value = data.get(key)?;
+    let stored_value = stored_raw_value.map(|value| protocol::read_message_from_bytes(&value)).transpose()?;
+    let stored_elements = match stored_value {
+        Some(DataType::Array { elements }) => {
+            Ok(elements)
+        },
+        None => {
+            Ok(Vec::new())
+        },
+        Some(_) => Err(anyhow!("Not an Array is stored in storage")),
+    }?;
+    Ok(stored_elements)
+}
 
-        let stored_raw_value = data.get(key)?;
+fn update_list_elements<F>(key: &str, storage: &Arc<Mutex<Storage>>, f: F) -> Result<Vec<DataType>, anyhow::Error>
+where F: FnOnce(&mut Vec<DataType>) -> Result<(), anyhow::Error> {
+    let mut data = storage
+        .lock()
+        .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
+    let stored_raw_value = data.get(key)?;
         let stored_value = stored_raw_value.map(|value| protocol::read_message_from_bytes(&value)).transpose()?;
-        let stored_elements = match stored_value {
-            Some(DataType::Array { elements }) => {
-                Ok(elements)
-            },
-            None => {
-                Ok(Vec::new())
-            },
-            Some(_) => Err(anyhow!("Not an Array is stored in storage")),
-        }?;
-        Ok(stored_elements)
-    }
+    let mut stored_elements = match stored_value {
+        Some(DataType::Array { elements }) => {
+            Ok(elements)
+        },
+        None => {
+            Ok(Vec::new())
+        },
+        Some(_) => Err(anyhow!("Not an Array is stored in storage")),
+    }?;
+    f(&mut stored_elements)?;
+    data.set(key, protocol::array(stored_elements.clone()).serialize(), None)?;
+    Ok(stored_elements)
 }
 
 /// Parses the command name from a received message.

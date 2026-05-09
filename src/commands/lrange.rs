@@ -15,7 +15,7 @@ use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 use crate::error::RedisError;
-use super::{RedisCommand, ListCommand};
+use super::{ RedisCommand, get_list_elements };
 
 /// LRANGE command implementation.
 pub struct LRange {
@@ -40,7 +40,7 @@ impl RedisCommand for LRange {
 
         debug!("LRANGE {} {} {}", key, start_index, end_index);
 
-        let stored_elements = self.get_stored_elements(key, storage)?;
+        let stored_elements = get_list_elements(key, storage)?;
         let selected_elements = stored_elements.get(start_index.max(0)..end_index.min(stored_elements.len())).map(|s| s.to_vec()).unwrap_or(Vec::new());
       Ok(vec![protocol::array(selected_elements)])
     }
@@ -57,8 +57,6 @@ impl RedisCommand for LRange {
         self.message.serialize()
     }
 }
-
-impl ListCommand for LRange {}
 
 #[cfg(test)]
 mod tests {
