@@ -11,12 +11,11 @@
 ///   Returns an error if the value stored at key is not a list.
 
 use std::sync::{Arc, Mutex};
-use log::*;
 use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
-use crate::error::RedisError;
-use super::{ RedisCommand, update_list_elements };
+use crate::commands::RedisCommand;
+use super::push_to_list;
 
 /// RPUSH command implementation.
 pub struct RPush {
@@ -25,26 +24,9 @@ pub struct RPush {
 
 impl RedisCommand for RPush {
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
-        let instructions: Vec<String> = self.message.as_vec()?;
-        let error = RedisError {
-            message: "Invalid RPUSH command syntax".to_string(),
-        };
-
-        let key = instructions.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
-        if instructions.len() < 3 {
-            return Err(error.clone().into());
-        }
-        let values = &instructions[2..];
-
-        debug!("RPUSH {} {:?}", key, values);
-
-        let updated_elements = update_list_elements(key, storage, |elements| {
-            for value in values {
-                elements.push(protocol::bulk_string(value));
-            }
-            Ok(())
-        })?;
-        Ok(vec![protocol::integer(updated_elements.len() as i64)])
+        push_to_list(&self.message, storage, "RPUSH", |elements, value| {
+            elements.push(protocol::bulk_string(value));
+        })
     }
 
     fn is_propagated_to_replicas(&self) -> bool {
@@ -63,29 +45,12 @@ impl RedisCommand for RPush {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::anyhow;
+    use super::super::read_list;
     use crate::commands::set::Set;
     use std::collections::HashMap;
 
     fn create_test_storage() -> Arc<Mutex<Storage>> {
         Arc::new(Mutex::new(Storage::new(HashMap::new())))
-    }
-
-    /// Read the list stored at `key` back as a `Vec<String>`.
-    /// Returns an error if the key is missing or the stored value isn't an Array.
-    fn read_list(storage: &Arc<Mutex<Storage>>, key: &str) -> anyhow::Result<Vec<String>> {
-        let raw = storage
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock storage: {}", e))?
-            .get(key)?
-            .ok_or_else(|| anyhow!("key '{}' not found in storage", key))?;
-        match protocol::read_message_from_bytes(&raw)? {
-            DataType::Array { elements } => elements
-                .iter()
-                .map(|e| e.as_string())
-                .collect(),
-            other => Err(anyhow!("Expected stored value to be an Array, got {:?}", other)),
-        }
     }
 
     #[test]

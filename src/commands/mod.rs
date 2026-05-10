@@ -6,8 +6,6 @@
 use std::sync::{Arc, Mutex};
 use crate::protocol::DataType;
 use crate::storage::Storage;
-use anyhow::anyhow;
-use crate::protocol;
 
 pub mod echo;
 pub mod ping;
@@ -17,8 +15,7 @@ pub mod get;
 pub mod info;
 pub mod replconf;
 pub mod psync;
-pub mod rpush;
-pub mod lrange;
+pub mod list;
 
 // Re-export all command types for convenience
 pub use echo::Echo;
@@ -29,8 +26,7 @@ pub use get::Get;
 pub use info::Info;
 pub use replconf::ReplConf;
 pub use psync::PSync;
-pub use rpush::RPush;
-pub use lrange::LRange;
+pub use list::{RPush, LPush, LRange};
 
 /// Trait for implementing Redis commands.
 ///
@@ -38,54 +34,15 @@ pub use lrange::LRange;
 pub trait RedisCommand {
     /// Execute the command and return response(s) to send to the client.
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error>;
-    
+
     /// Whether this command should be propagated to replica servers.
     fn is_propagated_to_replicas(&self) -> bool;
-    
+
     /// Whether to send a response even if this is a replica receiving replicated commands.
     fn should_always_reply(&self) -> bool;
-    
+
     /// Serialize this command to its RESP protocol representation.
     fn serialize(&self) -> Vec<u8>;
-}
-
-fn get_list_elements(key: &str, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
-    let mut data = storage
-        .lock()
-        .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
-    let stored_raw_value = data.get(key)?;
-    let stored_value = stored_raw_value.map(|value| protocol::read_message_from_bytes(&value)).transpose()?;
-    let stored_elements = match stored_value {
-        Some(DataType::Array { elements }) => {
-            Ok(elements)
-        },
-        None => {
-            Ok(Vec::new())
-        },
-        Some(_) => Err(anyhow!("Not an Array is stored in storage")),
-    }?;
-    Ok(stored_elements)
-}
-
-fn update_list_elements<F>(key: &str, storage: &Arc<Mutex<Storage>>, f: F) -> Result<Vec<DataType>, anyhow::Error>
-where F: FnOnce(&mut Vec<DataType>) -> Result<(), anyhow::Error> {
-    let mut data = storage
-        .lock()
-        .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
-    let stored_raw_value = data.get(key)?;
-        let stored_value = stored_raw_value.map(|value| protocol::read_message_from_bytes(&value)).transpose()?;
-    let mut stored_elements = match stored_value {
-        Some(DataType::Array { elements }) => {
-            Ok(elements)
-        },
-        None => {
-            Ok(Vec::new())
-        },
-        Some(_) => Err(anyhow!("Not an Array is stored in storage")),
-    }?;
-    f(&mut stored_elements)?;
-    data.set(key, protocol::array(stored_elements.clone()).serialize(), None)?;
-    Ok(stored_elements)
 }
 
 /// Parses the command name from a received message.
@@ -117,7 +74,7 @@ mod tests {
             protocol::bulk_string("key"),
             protocol::bulk_string("value"),
         ]);
-        
+
         let name = parse_command_name(&msg).unwrap();
         assert_eq!(name, "SET");
     }
@@ -127,7 +84,7 @@ mod tests {
         let msg = protocol::array(vec![
             protocol::bulk_string("PING"),
         ]);
-        
+
         let name = parse_command_name(&msg).unwrap();
         assert_eq!(name, "PING");
     }
