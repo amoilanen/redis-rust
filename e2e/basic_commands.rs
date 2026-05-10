@@ -5,6 +5,7 @@
 
 mod common;
 
+use anyhow::Result;
 use common::{free_port, ServerProcess};
 use std::thread;
 use std::time::Duration;
@@ -12,110 +13,115 @@ use std::time::Duration;
 // ========================= PING =========================
 
 #[test]
-fn test_ping_returns_pong() {
+fn test_ping_returns_pong() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    let resp = client.send_command(&["PING"]).unwrap();
+    let resp = client.send_command(&["PING"])?;
     assert_eq!(resp, "PONG");
+    Ok(())
 }
 
 #[test]
-fn test_multiple_pings() {
+fn test_multiple_pings() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
     for _ in 0..10 {
-        let resp = client.send_command(&["PING"]).unwrap();
+        let resp = client.send_command(&["PING"])?;
         assert_eq!(resp, "PONG");
     }
+    Ok(())
 }
 
 // ========================= ECHO =========================
 
 #[test]
-fn test_echo_simple() {
+fn test_echo_simple() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    let resp = client.send_command(&["ECHO", "Hello, Redis!"]).unwrap();
+    let resp = client.send_command(&["ECHO", "Hello, Redis!"])?;
     assert_eq!(resp, "Hello, Redis!");
+    Ok(())
 }
 
 #[test]
-fn test_echo_empty_string() {
+fn test_echo_empty_string() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    let resp = client.send_command(&["ECHO", ""]).unwrap();
+    let resp = client.send_command(&["ECHO", ""])?;
     assert_eq!(resp, "");
+    Ok(())
 }
 
 #[test]
-fn test_echo_special_characters() {
+fn test_echo_special_characters() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    let resp = client
-        .send_command(&["ECHO", "hello world !@#$%^&*()"])
-        .unwrap();
+    let resp = client.send_command(&["ECHO", "hello world !@#$%^&*()"])?;
     assert_eq!(resp, "hello world !@#$%^&*()");
+    Ok(())
 }
 
 // ========================= SET / GET =========================
 
 #[test]
-fn test_set_returns_ok() {
+fn test_set_returns_ok() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    let resp = client.send_command(&["SET", "testkey", "testvalue"]).unwrap();
+    let resp = client.send_command(&["SET", "testkey", "testvalue"])?;
     assert_eq!(resp, "OK");
+    Ok(())
 }
 
 #[test]
-fn test_get_existing_key() {
+fn test_get_existing_key() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    client.send_command(&["SET", "mykey", "myvalue"]).unwrap();
-    let resp = client.send_command(&["GET", "mykey"]).unwrap();
+    client.send_command(&["SET", "mykey", "myvalue"])?;
+    let resp = client.send_command(&["GET", "mykey"])?;
     assert_eq!(resp, "myvalue");
+    Ok(())
 }
 
 #[test]
-fn test_get_nonexistent_key() {
+fn test_get_nonexistent_key() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    let resp = client
-        .send_command(&["GET", "definitely_does_not_exist"])
-        .unwrap();
+    let resp = client.send_command(&["GET", "definitely_does_not_exist"])?;
     assert_eq!(resp, "(nil)");
+    Ok(())
 }
 
 #[test]
-fn test_set_overwrites_value() {
+fn test_set_overwrites_value() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    client.send_command(&["SET", "ow_key", "first"]).unwrap();
-    client.send_command(&["SET", "ow_key", "second"]).unwrap();
-    let resp = client.send_command(&["GET", "ow_key"]).unwrap();
+    client.send_command(&["SET", "ow_key", "first"])?;
+    client.send_command(&["SET", "ow_key", "second"])?;
+    let resp = client.send_command(&["GET", "ow_key"])?;
     assert_eq!(resp, "second");
+    Ok(())
 }
 
 #[test]
-fn test_multiple_keys() {
+fn test_multiple_keys() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
@@ -123,112 +129,111 @@ fn test_multiple_keys() {
     for i in 0..20 {
         let key = format!("key_{}", i);
         let val = format!("value_{}", i);
-        client.send_command(&["SET", &key, &val]).unwrap();
+        client.send_command(&["SET", &key, &val])?;
     }
     for i in 0..20 {
         let key = format!("key_{}", i);
         let expected = format!("value_{}", i);
-        let resp = client.send_command(&["GET", &key]).unwrap();
+        let resp = client.send_command(&["GET", &key])?;
         assert_eq!(resp, expected, "key_{} mismatch", i);
     }
+    Ok(())
 }
 
 #[test]
-fn test_numeric_values() {
+fn test_numeric_values() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    client.send_command(&["SET", "number", "42"]).unwrap();
-    let resp = client.send_command(&["GET", "number"]).unwrap();
+    client.send_command(&["SET", "number", "42"])?;
+    let resp = client.send_command(&["GET", "number"])?;
     assert_eq!(resp, "42");
+    Ok(())
 }
 
 #[test]
-fn test_value_with_spaces() {
+fn test_value_with_spaces() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    client
-        .send_command(&["SET", "greeting", "hello world"])
-        .unwrap();
-    let resp = client.send_command(&["GET", "greeting"]).unwrap();
+    client.send_command(&["SET", "greeting", "hello world"])?;
+    let resp = client.send_command(&["GET", "greeting"])?;
     assert_eq!(resp, "hello world");
+    Ok(())
 }
 
 #[test]
-fn test_large_value() {
+fn test_large_value() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
     // Keep moderate — the server has a 1s read timeout per connection
     let large_val: String = "x".repeat(1000);
-    client.send_command(&["SET", "large", &large_val]).unwrap();
-    let resp = client.send_command(&["GET", "large"]).unwrap();
+    client.send_command(&["SET", "large", &large_val])?;
+    let resp = client.send_command(&["GET", "large"])?;
     assert_eq!(resp, large_val);
+    Ok(())
 }
 
 // ========================= SET with PX expiration =========================
 
 #[test]
-fn test_key_exists_before_expiry() {
+fn test_key_exists_before_expiry() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    client
-        .send_command(&["SET", "expiring", "value", "px", "5000"])
-        .unwrap();
-    let resp = client.send_command(&["GET", "expiring"]).unwrap();
+    client.send_command(&["SET", "expiring", "value", "px", "5000"])?;
+    let resp = client.send_command(&["GET", "expiring"])?;
     assert_eq!(resp, "value");
+    Ok(())
 }
 
 #[test]
-fn test_key_expires_after_timeout() {
+fn test_key_expires_after_timeout() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    client
-        .send_command(&["SET", "short_lived", "gone_soon", "px", "500"])
-        .unwrap();
+    client.send_command(&["SET", "short_lived", "gone_soon", "px", "500"])?;
     // Should exist immediately
-    let resp = client.send_command(&["GET", "short_lived"]).unwrap();
+    let resp = client.send_command(&["GET", "short_lived"])?;
     assert_eq!(resp, "gone_soon");
 
     // Wait for expiration
     thread::sleep(Duration::from_millis(800));
 
     // Should be gone
-    let resp = client.send_command(&["GET", "short_lived"]).unwrap();
+    let resp = client.send_command(&["GET", "short_lived"])?;
     assert_eq!(resp, "(nil)");
+    Ok(())
 }
 
 #[test]
-fn test_set_without_expiry_persists() {
+fn test_set_without_expiry_persists() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    client
-        .send_command(&["SET", "persistent", "stays"])
-        .unwrap();
+    client.send_command(&["SET", "persistent", "stays"])?;
     thread::sleep(Duration::from_millis(500));
-    let resp = client.send_command(&["GET", "persistent"]).unwrap();
+    let resp = client.send_command(&["GET", "persistent"])?;
     assert_eq!(resp, "stays");
+    Ok(())
 }
 
 // ========================= INFO =========================
 
 #[test]
-fn test_info_replication_master() {
+fn test_info_replication_master() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    let resp = client.send_command(&["INFO", "replication"]).unwrap();
+    let resp = client.send_command(&["INFO", "replication"])?;
     assert!(
         resp.contains("role:master"),
         "expected role:master in: {}",
@@ -244,24 +249,26 @@ fn test_info_replication_master() {
         "expected master_repl_offset:0 in: {}",
         resp
     );
+    Ok(())
 }
 
 // ========================= COMMAND =========================
 
 #[test]
-fn test_command_responds() {
+fn test_command_responds() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
-    let resp = client.send_command(&["COMMAND"]).unwrap();
+    let resp = client.send_command(&["COMMAND"])?;
     assert_eq!(resp, "OK");
+    Ok(())
 }
 
 // ========================= Concurrent clients =========================
 
 #[test]
-fn test_multiple_clients_independent_operations() {
+fn test_multiple_clients_independent_operations() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
 
@@ -269,42 +276,29 @@ fn test_multiple_clients_independent_operations() {
     let mut client_b = server.client();
     let mut client_c = server.client();
 
-    client_a.send_command(&["SET", "a_key", "a_value"]).unwrap();
-    client_b.send_command(&["SET", "b_key", "b_value"]).unwrap();
-    client_c.send_command(&["SET", "c_key", "c_value"]).unwrap();
+    client_a.send_command(&["SET", "a_key", "a_value"])?;
+    client_b.send_command(&["SET", "b_key", "b_value"])?;
+    client_c.send_command(&["SET", "c_key", "c_value"])?;
 
     // Each client can see all keys
-    assert_eq!(
-        client_a.send_command(&["GET", "b_key"]).unwrap(),
-        "b_value"
-    );
-    assert_eq!(
-        client_b.send_command(&["GET", "c_key"]).unwrap(),
-        "c_value"
-    );
-    assert_eq!(
-        client_c.send_command(&["GET", "a_key"]).unwrap(),
-        "a_value"
-    );
+    assert_eq!(client_a.send_command(&["GET", "b_key"])?, "b_value");
+    assert_eq!(client_b.send_command(&["GET", "c_key"])?, "c_value");
+    assert_eq!(client_c.send_command(&["GET", "a_key"])?, "a_value");
+    Ok(())
 }
 
 #[test]
-fn test_concurrent_writes_to_same_key() {
+fn test_concurrent_writes_to_same_key() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
 
     let mut client_a = server.client();
     let mut client_b = server.client();
 
-    client_a.send_command(&["SET", "shared", "from_a"]).unwrap();
-    assert_eq!(
-        client_b.send_command(&["GET", "shared"]).unwrap(),
-        "from_a"
-    );
+    client_a.send_command(&["SET", "shared", "from_a"])?;
+    assert_eq!(client_b.send_command(&["GET", "shared"])?, "from_a");
 
-    client_b.send_command(&["SET", "shared", "from_b"]).unwrap();
-    assert_eq!(
-        client_a.send_command(&["GET", "shared"]).unwrap(),
-        "from_b"
-    );
+    client_b.send_command(&["SET", "shared", "from_b"])?;
+    assert_eq!(client_a.send_command(&["GET", "shared"])?, "from_b");
+    Ok(())
 }

@@ -4,6 +4,7 @@
 /// loaded correctly. The fixtures exercise various RDB format features
 /// as described in https://rdb.fnordig.de/file_format.html
 
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Cursor;
@@ -28,9 +29,10 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
-fn write_fixture(name: &str, data: &[u8]) {
+fn write_fixture(name: &str, data: &[u8]) -> Result<()> {
     let path = fixtures_dir().join(name);
-    fs::write(&path, data).unwrap_or_else(|e| panic!("Failed to write {}: {}", path.display(), e));
+    fs::write(&path, data).with_context(|| format!("Failed to write {}", path.display()))?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -273,162 +275,288 @@ fn generate_with_expired_keys() -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn fixture_empty_db() {
+fn fixture_empty_db() -> Result<()> {
     let rdb = generate_empty_db();
-    write_fixture("empty_db.rdb", &rdb);
+    write_fixture("empty_db.rdb", &rdb)?;
 
-    let data = fs::read(fixtures_dir().join("empty_db.rdb")).unwrap();
-    let storage = from_rdb(Cursor::new(&data)).unwrap();
+    let data = fs::read(fixtures_dir().join("empty_db.rdb"))?;
+    let storage = from_rdb(Cursor::new(&data))?;
     assert_eq!(storage.data.len(), 0);
+    Ok(())
 }
 
 #[test]
-fn fixture_string_keys() {
+fn fixture_string_keys() -> Result<()> {
     let rdb = generate_string_keys();
-    write_fixture("string_keys.rdb", &rdb);
+    write_fixture("string_keys.rdb", &rdb)?;
 
-    let data = fs::read(fixtures_dir().join("string_keys.rdb")).unwrap();
-    let storage = from_rdb(Cursor::new(&data)).unwrap();
+    let data = fs::read(fixtures_dir().join("string_keys.rdb"))?;
+    let storage = from_rdb(Cursor::new(&data))?;
     assert_eq!(storage.data.len(), 3);
-    assert_eq!(storage.data.get("name").unwrap().value, b"Redis");
-    assert_eq!(storage.data.get("version").unwrap().value, b"7.0.0");
-    assert_eq!(storage.data.get("lang").unwrap().value, b"C");
+    assert_eq!(
+        storage.data.get("name").context("missing key: name")?.value,
+        b"Redis"
+    );
+    assert_eq!(
+        storage.data.get("version").context("missing key: version")?.value,
+        b"7.0.0"
+    );
+    assert_eq!(
+        storage.data.get("lang").context("missing key: lang")?.value,
+        b"C"
+    );
+    Ok(())
 }
 
 #[test]
-fn fixture_with_expiry() {
+fn fixture_with_expiry() -> Result<()> {
     let rdb = generate_with_expiry();
-    write_fixture("with_expiry.rdb", &rdb);
+    write_fixture("with_expiry.rdb", &rdb)?;
 
-    let data = fs::read(fixtures_dir().join("with_expiry.rdb")).unwrap();
-    let storage = from_rdb(Cursor::new(&data)).unwrap();
+    let data = fs::read(fixtures_dir().join("with_expiry.rdb"))?;
+    let storage = from_rdb(Cursor::new(&data))?;
     assert_eq!(storage.data.len(), 3);
-    assert_eq!(storage.data.get("session:abc").unwrap().value, b"user123");
-    assert_eq!(storage.data.get("session:def").unwrap().value, b"user456");
-    assert_eq!(storage.data.get("permanent").unwrap().value, b"stays");
+    assert_eq!(
+        storage
+            .data
+            .get("session:abc")
+            .context("missing key: session:abc")?
+            .value,
+        b"user123"
+    );
+    assert_eq!(
+        storage
+            .data
+            .get("session:def")
+            .context("missing key: session:def")?
+            .value,
+        b"user456"
+    );
+    assert_eq!(
+        storage
+            .data
+            .get("permanent")
+            .context("missing key: permanent")?
+            .value,
+        b"stays"
+    );
 
     // Verify expiry is set on session keys but not on permanent
-    assert!(storage.data.get("session:abc").unwrap().expires_at_ms().is_some());
-    assert!(storage.data.get("session:def").unwrap().expires_at_ms().is_some());
-    assert!(storage.data.get("permanent").unwrap().expires_at_ms().is_none());
+    assert!(
+        storage
+            .data
+            .get("session:abc")
+            .context("missing key: session:abc")?
+            .expires_at_ms()
+            .is_some()
+    );
+    assert!(
+        storage
+            .data
+            .get("session:def")
+            .context("missing key: session:def")?
+            .expires_at_ms()
+            .is_some()
+    );
+    assert!(
+        storage
+            .data
+            .get("permanent")
+            .context("missing key: permanent")?
+            .expires_at_ms()
+            .is_none()
+    );
+    Ok(())
 }
 
 #[test]
-fn fixture_integer_encoded() {
+fn fixture_integer_encoded() -> Result<()> {
     let rdb = generate_integer_encoded();
-    write_fixture("integer_encoded.rdb", &rdb);
+    write_fixture("integer_encoded.rdb", &rdb)?;
 
-    let data = fs::read(fixtures_dir().join("integer_encoded.rdb")).unwrap();
-    let storage = from_rdb(Cursor::new(&data)).unwrap();
+    let data = fs::read(fixtures_dir().join("integer_encoded.rdb"))?;
+    let storage = from_rdb(Cursor::new(&data))?;
     assert_eq!(storage.data.len(), 4);
-    assert_eq!(storage.data.get("small_num").unwrap().value, b"42");
-    assert_eq!(storage.data.get("neg_num").unwrap().value, b"-5");
-    assert_eq!(storage.data.get("medium_num").unwrap().value, b"10000");
-    assert_eq!(storage.data.get("large_num").unwrap().value, b"1000000");
+    assert_eq!(
+        storage
+            .data
+            .get("small_num")
+            .context("missing key: small_num")?
+            .value,
+        b"42"
+    );
+    assert_eq!(
+        storage
+            .data
+            .get("neg_num")
+            .context("missing key: neg_num")?
+            .value,
+        b"-5"
+    );
+    assert_eq!(
+        storage
+            .data
+            .get("medium_num")
+            .context("missing key: medium_num")?
+            .value,
+        b"10000"
+    );
+    assert_eq!(
+        storage
+            .data
+            .get("large_num")
+            .context("missing key: large_num")?
+            .value,
+        b"1000000"
+    );
+    Ok(())
 }
 
 #[test]
-fn fixture_aux_and_resize() {
+fn fixture_aux_and_resize() -> Result<()> {
     let rdb = generate_aux_and_resize();
-    write_fixture("aux_and_resize.rdb", &rdb);
+    write_fixture("aux_and_resize.rdb", &rdb)?;
 
-    let data = fs::read(fixtures_dir().join("aux_and_resize.rdb")).unwrap();
-    let storage = from_rdb(Cursor::new(&data)).unwrap();
+    let data = fs::read(fixtures_dir().join("aux_and_resize.rdb"))?;
+    let storage = from_rdb(Cursor::new(&data))?;
     assert_eq!(storage.data.len(), 1);
-    assert_eq!(storage.data.get("greeting").unwrap().value, b"hello");
+    assert_eq!(
+        storage
+            .data
+            .get("greeting")
+            .context("missing key: greeting")?
+            .value,
+        b"hello"
+    );
+    Ok(())
 }
 
 #[test]
-fn fixture_multiple_databases() {
+fn fixture_multiple_databases() -> Result<()> {
     let rdb = generate_multiple_databases();
-    write_fixture("multiple_databases.rdb", &rdb);
+    write_fixture("multiple_databases.rdb", &rdb)?;
 
-    let data = fs::read(fixtures_dir().join("multiple_databases.rdb")).unwrap();
-    let storage = from_rdb(Cursor::new(&data)).unwrap();
+    let data = fs::read(fixtures_dir().join("multiple_databases.rdb"))?;
+    let storage = from_rdb(Cursor::new(&data))?;
     // All keys from all databases loaded into our single storage
     assert_eq!(storage.data.len(), 3);
-    assert_eq!(storage.data.get("db0:key1").unwrap().value, b"val1");
-    assert_eq!(storage.data.get("db0:key2").unwrap().value, b"val2");
-    assert_eq!(storage.data.get("db1:key1").unwrap().value, b"db1val");
+    assert_eq!(
+        storage
+            .data
+            .get("db0:key1")
+            .context("missing key: db0:key1")?
+            .value,
+        b"val1"
+    );
+    assert_eq!(
+        storage
+            .data
+            .get("db0:key2")
+            .context("missing key: db0:key2")?
+            .value,
+        b"val2"
+    );
+    assert_eq!(
+        storage
+            .data
+            .get("db1:key1")
+            .context("missing key: db1:key1")?
+            .value,
+        b"db1val"
+    );
+    Ok(())
 }
 
 #[test]
-fn fixture_mixed_types() {
+fn fixture_mixed_types() -> Result<()> {
     let rdb = generate_mixed_types();
-    write_fixture("mixed_types.rdb", &rdb);
+    write_fixture("mixed_types.rdb", &rdb)?;
 
-    let data = fs::read(fixtures_dir().join("mixed_types.rdb")).unwrap();
-    let storage = from_rdb(Cursor::new(&data)).unwrap();
+    let data = fs::read(fixtures_dir().join("mixed_types.rdb"))?;
+    let storage = from_rdb(Cursor::new(&data))?;
     // Only string keys should be loaded
     assert_eq!(storage.data.len(), 2);
-    assert_eq!(storage.data.get("string_key").unwrap().value, b"string_val");
     assert_eq!(
-        storage.data.get("another_string").unwrap().value,
+        storage
+            .data
+            .get("string_key")
+            .context("missing key: string_key")?
+            .value,
+        b"string_val"
+    );
+    assert_eq!(
+        storage
+            .data
+            .get("another_string")
+            .context("missing key: another_string")?
+            .value,
         b"another_val"
     );
     assert!(storage.data.get("hash_key").is_none());
     assert!(storage.data.get("set_key").is_none());
+    Ok(())
 }
 
 #[test]
-fn fixture_with_expired_keys() {
+fn fixture_with_expired_keys() -> Result<()> {
     let rdb = generate_with_expired_keys();
-    write_fixture("with_expired_keys.rdb", &rdb);
+    write_fixture("with_expired_keys.rdb", &rdb)?;
 
-    let data = fs::read(fixtures_dir().join("with_expired_keys.rdb")).unwrap();
-    let storage = from_rdb(Cursor::new(&data)).unwrap();
+    let data = fs::read(fixtures_dir().join("with_expired_keys.rdb"))?;
+    let storage = from_rdb(Cursor::new(&data))?;
     // Expired keys should be filtered out
     assert!(storage.data.get("expired1").is_none());
     assert!(storage.data.get("expired2").is_none());
-    assert_eq!(storage.data.get("valid").unwrap().value, b"fresh_data");
+    assert_eq!(
+        storage
+            .data
+            .get("valid")
+            .context("missing key: valid")?
+            .value,
+        b"fresh_data"
+    );
+    Ok(())
 }
 
 #[test]
-fn rdb_round_trip_via_storage_api() {
+fn rdb_round_trip_via_storage_api() -> Result<()> {
     let mut storage = Storage::new(HashMap::new());
-    storage
-        .set("user:1", b"alice".to_vec(), None)
-        .unwrap();
-    storage
-        .set("user:2", b"bob".to_vec(), Some(3_600_000))
-        .unwrap();
-    storage
-        .set("counter", b"42".to_vec(), None)
-        .unwrap();
+    storage.set("user:1", b"alice".to_vec(), None)?;
+    storage.set("user:2", b"bob".to_vec(), Some(3_600_000))?;
+    storage.set("counter", b"42".to_vec(), None)?;
 
-    let rdb_bytes = storage.to_rdb().unwrap();
-    let loaded = Storage::from_rdb(&rdb_bytes).unwrap();
+    let rdb_bytes = storage.to_rdb()?;
+    let loaded = Storage::from_rdb(&rdb_bytes)?;
 
     assert_eq!(loaded.to_pairs().get("user:1"), Some(&b"alice".to_vec()));
     assert_eq!(loaded.to_pairs().get("user:2"), Some(&b"bob".to_vec()));
     assert_eq!(loaded.to_pairs().get("counter"), Some(&b"42".to_vec()));
+    Ok(())
 }
 
 #[test]
-fn rdb_round_trip_binary_values() {
+fn rdb_round_trip_binary_values() -> Result<()> {
     let mut storage = Storage::new(HashMap::new());
     let binary = vec![0u8, 1, 2, 127, 128, 254, 255];
-    storage
-        .set("binary", binary.clone(), None)
-        .unwrap();
+    storage.set("binary", binary.clone(), None)?;
 
-    let rdb_bytes = storage.to_rdb().unwrap();
-    let loaded = Storage::from_rdb(&rdb_bytes).unwrap();
+    let rdb_bytes = storage.to_rdb()?;
+    let loaded = Storage::from_rdb(&rdb_bytes)?;
 
     assert_eq!(loaded.to_pairs().get("binary"), Some(&binary));
+    Ok(())
 }
 
 #[test]
-fn rdb_round_trip_empty_values() {
+fn rdb_round_trip_empty_values() -> Result<()> {
     let mut storage = Storage::new(HashMap::new());
-    storage.set("empty", b"".to_vec(), None).unwrap();
-    storage
-        .set("notempty", b"x".to_vec(), None)
-        .unwrap();
+    storage.set("empty", b"".to_vec(), None)?;
+    storage.set("notempty", b"x".to_vec(), None)?;
 
-    let rdb_bytes = storage.to_rdb().unwrap();
-    let loaded = Storage::from_rdb(&rdb_bytes).unwrap();
+    let rdb_bytes = storage.to_rdb()?;
+    let loaded = Storage::from_rdb(&rdb_bytes)?;
 
     assert_eq!(loaded.to_pairs().get("empty"), Some(&b"".to_vec()));
     assert_eq!(loaded.to_pairs().get("notempty"), Some(&b"x".to_vec()));
+    Ok(())
 }

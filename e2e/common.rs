@@ -166,32 +166,26 @@ impl RespClient {
     ///
     /// Returns the response as a `String`.  For null bulk strings, returns
     /// the special value `"(nil)"`.
-    pub fn send_command(&mut self, args: &[&str]) -> Result<String, String> {
+    pub fn send_command(&mut self, args: &[&str]) -> anyhow::Result<String> {
         // Serialize as RESP array of bulk strings
         let mut buf = format!("*{}\r\n", args.len());
         for arg in args {
             buf.push_str(&format!("${}\r\n{}\r\n", arg.len(), arg));
         }
-        self.writer
-            .write_all(buf.as_bytes())
-            .map_err(|e| format!("write error: {}", e))?;
-        self.writer
-            .flush()
-            .map_err(|e| format!("flush error: {}", e))?;
+        self.writer.write_all(buf.as_bytes())?;
+        self.writer.flush()?;
 
         self.read_response()
     }
 
     /// Read a single RESP response from the stream.
-    pub fn read_response(&mut self) -> Result<String, String> {
+    pub fn read_response(&mut self) -> anyhow::Result<String> {
         let mut line = String::new();
-        self.reader
-            .read_line(&mut line)
-            .map_err(|e| format!("read error: {}", e))?;
+        self.reader.read_line(&mut line)?;
         let line = line.trim_end_matches("\r\n").trim_end_matches('\n');
 
         if line.is_empty() {
-            return Err("empty response".to_string());
+            anyhow::bail!("empty response");
         }
 
         let prefix = &line[..1];
@@ -201,30 +195,24 @@ impl RespClient {
             // Simple string: +OK
             "+" => Ok(payload.to_string()),
             // Error: -ERR ...
-            "-" => Err(payload.to_string()),
+            "-" => Err(anyhow::anyhow!("{}", payload)),
             // Integer: :42
             ":" => Ok(payload.to_string()),
             // Bulk string: $N\r\n<data>\r\n  or  $-1\r\n
             "$" => {
-                let len: i64 = payload
-                    .parse()
-                    .map_err(|e| format!("invalid bulk length: {}", e))?;
+                let len: i64 = payload.parse()?;
                 if len < 0 {
                     return Ok("(nil)".to_string());
                 }
                 let len = len as usize;
                 let mut data = vec![0u8; len + 2]; // +2 for trailing \r\n
-                self.reader
-                    .read_exact(&mut data)
-                    .map_err(|e| format!("read bulk data error: {}", e))?;
+                self.reader.read_exact(&mut data)?;
                 data.truncate(len); // strip \r\n
-                String::from_utf8(data).map_err(|e| format!("invalid utf8: {}", e))
+                Ok(String::from_utf8(data)?)
             }
             // Array: *N\r\n  (read N elements)
             "*" => {
-                let count: i64 = payload
-                    .parse()
-                    .map_err(|e| format!("invalid array length: {}", e))?;
+                let count: i64 = payload.parse()?;
                 if count < 0 {
                     return Ok("(nil)".to_string());
                 }
@@ -235,7 +223,7 @@ impl RespClient {
                 // Return as comma-separated for simple inspection
                 Ok(parts.join(","))
             }
-            _ => Err(format!("unknown RESP prefix: {}", prefix)),
+            _ => Err(anyhow::anyhow!("unknown RESP prefix: {}", prefix)),
         }
     }
 }

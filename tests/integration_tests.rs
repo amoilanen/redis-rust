@@ -7,6 +7,7 @@
 /// - Protocol compliance
 /// - Complex real-world scenarios
 
+use anyhow::Result;
 use codecrafters_redis::commands::*;
 use codecrafters_redis::protocol;
 use codecrafters_redis::protocol::DataType;
@@ -16,7 +17,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use std::error::Error;
 
 fn create_test_storage() -> Arc<Mutex<Storage>> {
     let data: HashMap<String, StoredValue> = HashMap::new();
@@ -26,7 +26,7 @@ fn create_test_storage() -> Arc<Mutex<Storage>> {
 // ============= PING TESTS =============
 
 #[test]
-fn e2e_ping_works() -> Result<(), Box<dyn Error>> {
+fn e2e_ping_works() -> Result<()> {
     let message = protocol::array(vec![protocol::bulk_string("PING")]);
     let cmd = Ping { message };
 
@@ -40,7 +40,7 @@ fn e2e_ping_works() -> Result<(), Box<dyn Error>> {
 // ============= ECHO TESTS =============
 
 #[test]
-fn e2e_echo_returns_argument() -> Result<(), Box<dyn Error>> {
+fn e2e_echo_returns_argument() -> Result<()> {
     let echo_msg = protocol::bulk_string("Hello Redis!");
     let message = protocol::array(vec![
         protocol::bulk_string("ECHO"),
@@ -66,7 +66,7 @@ fn e2e_echo_returns_argument() -> Result<(), Box<dyn Error>> {
 // ============= SET/GET TESTS =============
 
 #[test]
-fn e2e_set_get_basic() -> Result<(), Box<dyn Error>> {
+fn e2e_set_get_basic() -> Result<()> {
     let storage = create_test_storage();
 
     // Set a value
@@ -91,7 +91,7 @@ fn e2e_set_get_basic() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn e2e_multiple_keys() -> Result<(), Box<dyn Error>> {
+fn e2e_multiple_keys() -> Result<()> {
     let storage = create_test_storage();
 
     // Set multiple values
@@ -126,7 +126,7 @@ fn e2e_multiple_keys() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn e2e_get_nonexistent_key() -> Result<(), Box<dyn Error>> {
+fn e2e_get_nonexistent_key() -> Result<()> {
     let storage = create_test_storage();
 
     let msg = protocol::array(vec![
@@ -142,7 +142,7 @@ fn e2e_get_nonexistent_key() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn e2e_overwrite_key() -> Result<(), Box<dyn Error>> {
+fn e2e_overwrite_key() -> Result<()> {
     let storage = create_test_storage();
 
     // Set initial value
@@ -178,7 +178,7 @@ fn e2e_overwrite_key() -> Result<(), Box<dyn Error>> {
 // ============= EXPIRATION TESTS =============
 
 #[test]
-fn e2e_key_expires() -> Result<(), Box<dyn Error>> {
+fn e2e_key_expires() -> Result<()> {
     let storage = create_test_storage();
 
     // Set with 100ms expiration
@@ -209,7 +209,7 @@ fn e2e_key_expires() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn e2e_key_expires_uppercase_px() -> Result<(), Box<dyn Error>> {
+fn e2e_key_expires_uppercase_px() -> Result<()> {
     let storage = create_test_storage();
 
     // Set with 100ms expiration using uppercase PX (as sent by redis-cli)
@@ -240,7 +240,7 @@ fn e2e_key_expires_uppercase_px() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn e2e_long_lived_key() -> Result<(), Box<dyn Error>> {
+fn e2e_long_lived_key() -> Result<()> {
     let storage = create_test_storage();
 
     // Set with 5 second expiration
@@ -267,13 +267,13 @@ fn e2e_long_lived_key() -> Result<(), Box<dyn Error>> {
 // ============= BINARY DATA TESTS =============
 
 #[test]
-fn e2e_binary_data_preserved() -> Result<(), Box<dyn Error>> {
+fn e2e_binary_data_preserved() -> Result<()> {
     let storage = create_test_storage();
 
     // Manually insert binary data
     let binary_data = vec![0u8, 1, 2, 3, 255, 254, 127];
     {
-        let mut data = storage.lock().map_err(|_| "Failed to lock storage".to_string())?;
+        let mut data = storage.lock().map_err(|_| anyhow::anyhow!("Failed to lock storage"))?;
         let _ = data.set("binary", binary_data.clone(), None);
     }
 
@@ -289,7 +289,7 @@ fn e2e_binary_data_preserved() -> Result<(), Box<dyn Error>> {
         DataType::BulkString { value: Some(v) } => {
             assert_eq!(v, &binary_data);
         }
-        _ => return Err("Expected bulk string".into()),
+        _ => anyhow::bail!("Expected bulk string"),
     }
     Ok(())
 }
@@ -297,7 +297,7 @@ fn e2e_binary_data_preserved() -> Result<(), Box<dyn Error>> {
 // ============= ERROR HANDLING TESTS =============
 
 #[test]
-fn e2e_set_missing_value_fails() -> Result<(), Box<dyn Error>> {
+fn e2e_set_missing_value_fails() -> Result<()> {
     let storage = create_test_storage();
 
     let msg = protocol::array(vec![
@@ -312,7 +312,7 @@ fn e2e_set_missing_value_fails() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn e2e_get_missing_key_fails() -> Result<(), Box<dyn Error>> {
+fn e2e_get_missing_key_fails() -> Result<()> {
     let storage = create_test_storage();
 
     let msg = protocol::array(vec![
@@ -328,7 +328,7 @@ fn e2e_get_missing_key_fails() -> Result<(), Box<dyn Error>> {
 // ============= REPLICATION TESTS =============
 
 #[test]
-fn e2e_info_command_master() -> Result<(), Box<dyn Error>> {
+fn e2e_info_command_master() -> Result<()> {
     let server_state = Arc::new(ServerState::new(None, 6379));
     let msg = protocol::array(vec![
         protocol::bulk_string("INFO"),
@@ -350,7 +350,7 @@ fn e2e_info_command_master() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn e2e_info_command_replica() -> Result<(), Box<dyn Error>> {
+fn e2e_info_command_replica() -> Result<()> {
     let server_state = Arc::new(ServerState::new(Some("localhost 6379".to_owned()), 6380));
     let msg = protocol::array(vec![
         protocol::bulk_string("INFO"),
@@ -372,7 +372,7 @@ fn e2e_info_command_replica() -> Result<(), Box<dyn Error>> {
 // ============= COMPLEX SCENARIOS =============
 
 #[test]
-fn e2e_mixed_operations() -> Result<(), Box<dyn Error>> {
+fn e2e_mixed_operations() -> Result<()> {
     let storage = create_test_storage();
 
     // 1. Set multiple cache entries
@@ -428,7 +428,7 @@ fn e2e_mixed_operations() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn e2e_session_simulation() -> Result<(), Box<dyn Error>> {
+fn e2e_session_simulation() -> Result<()> {
     let storage = create_test_storage();
 
     // Simulate a user session cache
@@ -462,7 +462,7 @@ fn e2e_session_simulation() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn e2e_user_profile_caching() -> Result<(), Box<dyn Error>> {
+fn e2e_user_profile_caching() -> Result<()> {
     let storage = create_test_storage();
 
     // Simulate caching user profile
@@ -490,7 +490,7 @@ fn e2e_user_profile_caching() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn e2e_rate_limiting_with_expiration() -> Result<(), Box<dyn Error>> {
+fn e2e_rate_limiting_with_expiration() -> Result<()> {
     let storage = create_test_storage();
 
     // Simulate rate limiter that expires after 60 seconds
@@ -531,7 +531,7 @@ fn e2e_rate_limiting_with_expiration() -> Result<(), Box<dyn Error>> {
 // and compose correctly against a shared `Storage` via the public API.
 
 #[test]
-fn e2e_list_commands_public_api_smoke_test() -> Result<(), Box<dyn Error>> {
+fn e2e_list_commands_public_api_smoke_test() -> Result<()> {
     let storage = create_test_storage();
 
     // RPUSH appends two values: list is now ["x", "y"], length 2.
