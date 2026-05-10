@@ -518,3 +518,59 @@ fn e2e_rate_limiting_with_expiration() -> Result<(), Box<dyn Error>> {
     assert_eq!(result[0].as_string()?, "3");
     Ok(())
 }
+
+// ============= LIST COMMANDS (RPUSH / LPUSH / LRANGE) =============
+//
+// Per-command logic and edge cases (negative indices, wrong-type collisions,
+// empty lists, etc.) are covered exhaustively by the unit tests in
+// src/commands/list/*.rs. Wire-format encoding, dispatcher wiring, and
+// multi-connection behaviour are covered by e2e/list_commands.rs.
+//
+// This layer keeps a single smoke test whose only job is to prove that
+// `RPush`, `LPush`, and `LRange` are publicly re-exported from the crate
+// and compose correctly against a shared `Storage` via the public API.
+
+#[test]
+fn e2e_list_commands_public_api_smoke_test() -> Result<(), Box<dyn Error>> {
+    let storage = create_test_storage();
+
+    // RPUSH appends two values: list is now ["x", "y"], length 2.
+    let r1 = RPush {
+        message: protocol::array(vec![
+            protocol::bulk_string("RPUSH"),
+            protocol::bulk_string("k"),
+            protocol::bulk_string("x"),
+            protocol::bulk_string("y"),
+        ]),
+    }
+    .execute(&storage)?;
+    assert_eq!(r1[0].as_string()?, "2");
+
+    // LPUSH prepends two values one at a time: "b" -> [b,x,y], then "a" -> [a,b,x,y].
+    let r2 = LPush {
+        message: protocol::array(vec![
+            protocol::bulk_string("LPUSH"),
+            protocol::bulk_string("k"),
+            protocol::bulk_string("b"),
+            protocol::bulk_string("a"),
+        ]),
+    }
+    .execute(&storage)?;
+    assert_eq!(r2[0].as_string()?, "4");
+
+    // LRANGE 0 -1 reads the full list back through the public API.
+    let r3 = LRange {
+        message: protocol::array(vec![
+            protocol::bulk_string("LRANGE"),
+            protocol::bulk_string("k"),
+            protocol::integer(0),
+            protocol::integer(-1),
+        ]),
+    }
+    .execute(&storage)?;
+    let expected = protocol::array(
+        ["a", "b", "x", "y"].iter().map(|s| protocol::bulk_string(s)).collect(),
+    );
+    assert_eq!(r3[0], expected);
+    Ok(())
+}
