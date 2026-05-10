@@ -11,7 +11,6 @@
 ///   Returns an error if the value stored at key is not a list.
 
 use std::sync::{Arc, Mutex};
-use anyhow::anyhow;
 use log::*;
 use crate::protocol;
 use crate::protocol::DataType;
@@ -64,6 +63,7 @@ impl RedisCommand for RPush {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::anyhow;
     use crate::commands::set::Set;
     use std::collections::HashMap;
 

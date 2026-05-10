@@ -34,14 +34,21 @@ impl RedisCommand for LRange {
         if instructions.len() < 4 {
             return Err(error.clone().into());
         }
-        let start_index: usize = instructions.get(2).ok_or::<anyhow::Error>(error.clone().into())?.parse()?;
-        let mut end_index: usize = instructions.get(3).ok_or::<anyhow::Error>(error.clone().into())?.parse()?;
-        end_index = end_index + 1;
+        let mut start_index: i64 = instructions.get(2).ok_or::<anyhow::Error>(error.clone().into())?.parse()?;
+        let mut end_index: i64 = instructions.get(3).ok_or::<anyhow::Error>(error.clone().into())?.parse()?;
 
         debug!("LRANGE {} {} {}", key, start_index, end_index);
-
         let stored_elements = get_list_elements(key, storage)?;
-        let selected_elements = stored_elements.get(start_index.max(0)..end_index.min(stored_elements.len())).map(|s| s.to_vec()).unwrap_or(Vec::new());
+        if end_index < 0 {
+            end_index = (stored_elements.len() as i64 + end_index) as i64;
+        }
+        if start_index < 0 {
+            start_index = (stored_elements.len() as i64 + start_index) as i64;
+        }
+        let final_start_index = start_index.max(0).min(stored_elements.len() as i64) as usize;
+        let final_end_index = (end_index + 1).max(0).min(stored_elements.len() as i64) as usize;
+        let selected_elements = stored_elements.get(final_start_index..final_end_index)
+            .map(|s| s.to_vec()).unwrap_or(Vec::new());
       Ok(vec![protocol::array(selected_elements)])
     }
 
@@ -72,12 +79,12 @@ mod tests {
         Ok(())
     }
 
-    fn lrange(key: &str, start_index: usize, end_index: usize) -> LRange {
+    fn lrange(key: &str, start_index: i64, end_index: i64) -> LRange {
         let msg = protocol::array(vec![
             protocol::bulk_string("LRANGE"),
             protocol::bulk_string(key),
-            protocol::integer(start_index as i64),
-            protocol::integer(end_index as i64),
+            protocol::integer(start_index),
+            protocol::integer(end_index),
         ]);
         LRange { message: msg }
     }
@@ -87,12 +94,12 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["value1", "value2", "value3", "value4", "value5"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::simple_string(s)).collect();
+        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
         set_list_values(&storage, key, &elements)?;
 
-        let start_index = 1;
-        let end_index = 3;
-        let result = lrange(key, start_index, end_index).execute(&storage)?;
+        let start_index: usize = 1;
+        let end_index: usize = 3;
+        let result = lrange(key, start_index as i64, end_index as i64).execute(&storage)?;
 
         assert_eq!(&result[0], &protocol::array(elements[start_index..end_index + 1].to_vec()));
         Ok(())
@@ -104,14 +111,64 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["value1", "value2", "value3", "value4", "value5"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::simple_string(s)).collect();
+        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
         set_list_values(&storage, key, &elements)?;
 
         let start_index = values.len() + 1;
         let end_index = start_index + 1;
-        let result = lrange(key, start_index, end_index).execute(&storage)?;
+        let result = lrange(key, start_index as i64, end_index as i64).execute(&storage)?;
 
         assert_eq!(&result[0], &protocol::array(Vec::new()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_lrange_with_negative_indices() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let key = "mylist";
+        let values = vec!["value1", "value2", "value3", "value4", "value5"];
+        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
+        set_list_values(&storage, key, &elements)?;
+
+        {
+            let start_index = 1;
+            let end_index =  -1;
+            let result = lrange(key, start_index as i64, end_index).execute(&storage)?;
+
+            assert_eq!(&result[0], &protocol::array(elements[start_index..].to_vec()));
+        }
+
+        {
+            let start_index = 1;
+            let end_index =  -1;
+            let result = lrange(key, start_index as i64, end_index).execute(&storage)?;
+
+            assert_eq!(&result[0], &protocol::array(elements[start_index..].to_vec()));
+        }
+
+        {
+            let start_index = 0;
+            let end_index =  -1;
+            let result = lrange(key, start_index as i64, end_index).execute(&storage)?;
+
+            assert_eq!(&result[0], &protocol::array(elements.clone()));
+        }
+
+        {
+            let start_index = -3;
+            let end_index =  -1;
+            let result = lrange(key, start_index as i64, end_index).execute(&storage)?;
+
+            assert_eq!(&result[0], &protocol::array(elements[2..].to_vec()));
+        }
+
+        {
+            let start_index = -100;
+            let end_index =  100;
+            let result = lrange(key, start_index as i64, end_index).execute(&storage)?;
+
+            assert_eq!(&result[0], &protocol::array(elements.clone()));
+        }
         Ok(())
     }
 
@@ -120,12 +177,12 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["value1", "value2", "value3", "value4", "value5"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::simple_string(s)).collect();
+        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
         set_list_values(&storage, key, &elements)?;
 
         let start_index = 2;
         let end_index = values.len() + 1;
-        let result = lrange(key, start_index, end_index).execute(&storage)?;
+        let result = lrange(key, start_index as i64, end_index as i64).execute(&storage)?;
 
         assert_eq!(&result[0], &protocol::array(elements[start_index..].to_vec()));
         Ok(())
@@ -136,7 +193,7 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["value1", "value2", "value3", "value4", "value5"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::simple_string(s)).collect();
+        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
         set_list_values(&storage, key, &elements)?;
 
         let start_index = 3;
