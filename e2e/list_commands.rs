@@ -1,4 +1,4 @@
-/// E2E tests for list commands: RPUSH, LPUSH, LRANGE.
+/// E2E tests for list commands: RPUSH, LPUSH, LRANGE, LLEN.
 ///
 /// Each test starts a fresh master server process, sends commands over TCP,
 /// and asserts on the RESP responses. Unlike the unit/integration tests,
@@ -145,6 +145,38 @@ fn test_lrange_on_nonexistent_key_returns_empty_array() -> Result<()> {
 
     let resp = client.send_command(&["LRANGE", "never_created", "0", "-1"])?;
     assert_eq!(resp, "");
+    Ok(())
+}
+
+// ========================= LLEN =========================
+
+#[test]
+fn test_llen_returns_length_of_existing_list() -> Result<()> {
+    // Validates the wire encoding for LLEN: it must reply with a RESP
+    // integer (`:N\r\n`), which the test client surfaces as the bare number.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(
+        client.send_command(&["RPUSH", "list_key", "a", "b", "c", "d"])?,
+        "4"
+    );
+    let resp = client.send_command(&["LLEN", "list_key"])?;
+    assert_eq!(resp, "4");
+    Ok(())
+}
+
+#[test]
+fn test_llen_on_nonexistent_key_returns_zero() -> Result<()> {
+    // Wire-level behaviour: LLEN on a key that was never created must
+    // reply with a RESP integer 0 (`:0\r\n`).
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    let resp = client.send_command(&["LLEN", "missing_list_key"])?;
+    assert_eq!(resp, "0");
     Ok(())
 }
 

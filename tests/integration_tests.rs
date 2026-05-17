@@ -519,7 +519,7 @@ fn e2e_rate_limiting_with_expiration() -> Result<()> {
     Ok(())
 }
 
-// ============= LIST COMMANDS (RPUSH / LPUSH / LRANGE) =============
+// ============= LIST COMMANDS (RPUSH / LPUSH / LRANGE / LLEN) =============
 //
 // Per-command logic and edge cases (negative indices, wrong-type collisions,
 // empty lists, etc.) are covered exhaustively by the unit tests in
@@ -527,8 +527,8 @@ fn e2e_rate_limiting_with_expiration() -> Result<()> {
 // multi-connection behaviour are covered by e2e/list_commands.rs.
 //
 // This layer keeps a single smoke test whose only job is to prove that
-// `RPush`, `LPush`, and `LRange` are publicly re-exported from the crate
-// and compose correctly against a shared `Storage` via the public API.
+// `RPush`, `LPush`, `LRange`, and `LLen` are publicly re-exported from the
+// crate and compose correctly against a shared `Storage` via the public API.
 
 #[test]
 fn e2e_list_commands_public_api_smoke_test() -> Result<()> {
@@ -572,5 +572,25 @@ fn e2e_list_commands_public_api_smoke_test() -> Result<()> {
         ["a", "b", "x", "y"].iter().map(|s| protocol::bulk_string(s)).collect(),
     );
     assert_eq!(r3[0], expected);
+
+    // LLEN reports the current length of the list (4 after RPUSH + LPUSH).
+    let r4 = LLen {
+        message: protocol::array(vec![
+            protocol::bulk_string("LLEN"),
+            protocol::bulk_string("k"),
+        ]),
+    }
+    .execute(&storage)?;
+    assert_eq!(r4[0], protocol::integer(4));
+
+    // LLEN on a missing key returns 0 (treated as empty list).
+    let r5 = LLen {
+        message: protocol::array(vec![
+            protocol::bulk_string("LLEN"),
+            protocol::bulk_string("missing"),
+        ]),
+    }
+    .execute(&storage)?;
+    assert_eq!(r5[0], protocol::integer(0));
     Ok(())
 }

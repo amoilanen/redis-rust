@@ -47,13 +47,8 @@ impl RedisCommand for LPush {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::read_list;
+    use super::super::{create_test_storage, read_list};
     use crate::commands::set::Set;
-    use std::collections::HashMap;
-
-    fn create_test_storage() -> Arc<Mutex<Storage>> {
-        Arc::new(Mutex::new(Storage::new(HashMap::new())))
-    }
 
     fn lpush_msg(key: &str, values: &[&str]) -> DataType {
         let mut parts = vec![

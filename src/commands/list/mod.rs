@@ -1,7 +1,7 @@
 /// List command family.
 ///
 /// This module groups every Redis command that operates on the list data type
-/// (RPUSH, LPUSH, LRANGE, ...) together with the helpers they share.
+/// (RPUSH, LPUSH, LRANGE, LLEN, ...) together with the helpers they share.
 ///
 /// Helpers are private to this module - by Rust's default visibility rules
 /// they are still accessible from descendant modules (rpush, lpush, lrange,
@@ -20,10 +20,12 @@ use crate::error::RedisError;
 pub mod rpush;
 pub mod lpush;
 pub mod lrange;
+pub mod llen;
 
 pub use rpush::RPush;
 pub use lpush::LPush;
 pub use lrange::LRange;
+pub use llen::LLen;
 
 /// Read the list stored at `key` from `storage`.
 ///
@@ -123,6 +125,30 @@ where
 //
 // Gated with `#[cfg(test)]` so they are stripped from release builds entirely.
 // ---------------------------------------------------------------------------
+
+/// Build a fresh, empty `Storage` wrapped in an `Arc<Mutex<...>>` for unit tests.
+#[cfg(test)]
+fn create_test_storage() -> Arc<Mutex<Storage>> {
+    use std::collections::HashMap;
+    Arc::new(Mutex::new(Storage::new(HashMap::new())))
+}
+
+/// Seed `storage` with a list at `key` containing the given `elements`.
+///
+/// Writes the values as a RESP-serialized Array so that `get_list_elements`
+/// and the public command implementations can read it back.
+#[cfg(test)]
+fn set_list_values(
+    storage: &Arc<Mutex<Storage>>,
+    key: &str,
+    elements: &[DataType],
+) -> anyhow::Result<()> {
+    storage
+        .lock()
+        .map_err(|e| anyhow!("Failed to lock storage: {}", e))?
+        .set(key, protocol::array(elements.to_vec()).serialize(), None)?;
+    Ok(())
+}
 
 /// Read the list stored at `key` back as a `Vec<String>`.
 ///

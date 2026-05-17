@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::protocol::DataType;
 use crate::io;
-use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Command, Info, ReplConf, PSync, RPush, LPush, LRange};
+use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen};
 use crate::storage::Storage;
 use crate::server_state::ServerState;
 
@@ -94,6 +94,10 @@ pub fn handle_connection(
                         }));
                     } else if command_name == "LRANGE" {
                         command = Some(Box::new(LRange {
+                            message: received_message.clone()
+                        }));
+                    } else if command_name == "LLEN" {
+                        command = Some(Box::new(LLen {
                             message: received_message.clone()
                         }));
                     } else if command_name == "PSYNC" {

@@ -69,16 +69,7 @@ impl RedisCommand for LRange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-
-    fn create_test_storage() -> Arc<Mutex<Storage>> {
-        Arc::new(Mutex::new(Storage::new(HashMap::new())))
-    }
-
-    fn set_list_values(storage: &Arc<Mutex<Storage>>, key: &str, elements: &[DataType]) -> anyhow::Result<()> {
-        storage.lock().unwrap().set(key, protocol::array(elements.to_vec().clone()).serialize(), None)?;
-        Ok(())
-    }
+    use super::super::{create_test_storage, set_list_values};
 
     fn lrange(key: &str, start_index: i64, end_index: i64) -> LRange {
         let msg = protocol::array(vec![
