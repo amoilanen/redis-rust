@@ -1,4 +1,4 @@
-/// E2E tests for list commands: RPUSH, LPUSH, LRANGE, LLEN.
+/// E2E tests for list commands: RPUSH, LPUSH, LRANGE, LLEN, LPOP.
 ///
 /// Each test starts a fresh master server process, sends commands over TCP,
 /// and asserts on the RESP responses. Unlike the unit/integration tests,
@@ -177,6 +177,63 @@ fn test_llen_on_nonexistent_key_returns_zero() -> Result<()> {
 
     let resp = client.send_command(&["LLEN", "missing_list_key"])?;
     assert_eq!(resp, "0");
+    Ok(())
+}
+
+// ========================= LPOP =========================
+
+#[test]
+fn test_lpop_removes_and_returns_head_as_bulk_string() -> Result<()> {
+    // Validates the wire encoding for LPOP: it must reply with a RESP bulk
+    // string (`$3\r\none\r\n`), which the test client surfaces as the bare
+    // payload. Exactly mirrors the example from the task description.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(
+        client.send_command(&["RPUSH", "list_key", "one", "two", "three", "four", "five"])?,
+        "5"
+    );
+
+    let resp = client.send_command(&["LPOP", "list_key"])?;
+    assert_eq!(resp, "one");
+
+    // LRANGE confirms the head was removed and the rest of the list is intact.
+    let resp = client.send_command(&["LRANGE", "list_key", "0", "-1"])?;
+    assert_eq!(resp, "two,three,four,five");
+    Ok(())
+}
+
+#[test]
+fn test_lpop_on_nonexistent_key_returns_nil() -> Result<()> {
+    // Wire-level behaviour: LPOP on a key that was never created must reply
+    // with a null bulk string (`$-1\r\n`). The test client surfaces null
+    // bulk strings as the literal "(nil)".
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    let resp = client.send_command(&["LPOP", "missing_list_key"])?;
+    assert_eq!(resp, "(nil)");
+    Ok(())
+}
+
+#[test]
+fn test_lpop_drains_list_then_returns_nil() -> Result<()> {
+    // Drain a two-element list one element at a time, then confirm a third
+    // LPOP on the now-empty key returns a null bulk string.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["RPUSH", "k", "a", "b"])?, "2");
+    assert_eq!(client.send_command(&["LPOP", "k"])?, "a");
+    assert_eq!(client.send_command(&["LPOP", "k"])?, "b");
+    assert_eq!(client.send_command(&["LPOP", "k"])?, "(nil)");
+
+    // LLEN confirms the list is empty (or absent — both report 0).
+    assert_eq!(client.send_command(&["LLEN", "k"])?, "0");
     Ok(())
 }
 

@@ -519,7 +519,7 @@ fn e2e_rate_limiting_with_expiration() -> Result<()> {
     Ok(())
 }
 
-// ============= LIST COMMANDS (RPUSH / LPUSH / LRANGE / LLEN) =============
+// ============= LIST COMMANDS (RPUSH / LPUSH / LRANGE / LLEN / LPOP) =============
 //
 // Per-command logic and edge cases (negative indices, wrong-type collisions,
 // empty lists, etc.) are covered exhaustively by the unit tests in
@@ -527,8 +527,9 @@ fn e2e_rate_limiting_with_expiration() -> Result<()> {
 // multi-connection behaviour are covered by e2e/list_commands.rs.
 //
 // This layer keeps a single smoke test whose only job is to prove that
-// `RPush`, `LPush`, `LRange`, and `LLen` are publicly re-exported from the
-// crate and compose correctly against a shared `Storage` via the public API.
+// `RPush`, `LPush`, `LRange`, `LLen`, and `LPop` are publicly re-exported
+// from the crate and compose correctly against a shared `Storage` via the
+// public API.
 
 #[test]
 fn e2e_list_commands_public_api_smoke_test() -> Result<()> {
@@ -592,5 +593,40 @@ fn e2e_list_commands_public_api_smoke_test() -> Result<()> {
     }
     .execute(&storage)?;
     assert_eq!(r5[0], protocol::integer(0));
+
+    // LPOP removes and returns the head: "a" comes off, leaving [b,x,y].
+    let r6 = LPop {
+        message: protocol::array(vec![
+            protocol::bulk_string("LPOP"),
+            protocol::bulk_string("k"),
+        ]),
+    }
+    .execute(&storage)?;
+    assert_eq!(r6[0], protocol::bulk_string("a"));
+
+    // LRANGE confirms the head was actually removed in shared storage.
+    let r7 = LRange {
+        message: protocol::array(vec![
+            protocol::bulk_string("LRANGE"),
+            protocol::bulk_string("k"),
+            protocol::integer(0),
+            protocol::integer(-1),
+        ]),
+    }
+    .execute(&storage)?;
+    let expected_after_pop = protocol::array(
+        ["b", "x", "y"].iter().map(|s| protocol::bulk_string(s)).collect(),
+    );
+    assert_eq!(r7[0], expected_after_pop);
+
+    // LPOP on a missing key returns a null bulk string.
+    let r8 = LPop {
+        message: protocol::array(vec![
+            protocol::bulk_string("LPOP"),
+            protocol::bulk_string("missing"),
+        ]),
+    }
+    .execute(&storage)?;
+    assert_eq!(r8[0], protocol::bulk_string_empty());
     Ok(())
 }

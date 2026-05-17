@@ -21,11 +21,13 @@ pub mod rpush;
 pub mod lpush;
 pub mod lrange;
 pub mod llen;
+pub mod lpop;
 
 pub use rpush::RPush;
 pub use lpush::LPush;
 pub use lrange::LRange;
 pub use llen::LLen;
+pub use lpop::LPop;
 
 /// Read the list stored at `key` from `storage`.
 ///
