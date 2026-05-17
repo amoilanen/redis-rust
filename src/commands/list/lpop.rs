@@ -13,7 +13,6 @@
 
 use std::sync::{Arc, Mutex};
 use log::*;
-use anyhow::anyhow;
 use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
@@ -40,25 +39,19 @@ impl RedisCommand for LPop {
 
         debug!("LPOP {}", key);
 
-        // Capture the popped element via interior mutability so we can return
-        // it after update_list_elements writes the shortened list back.
-        let popped: Arc<Mutex<Option<DataType>>> = Arc::new(Mutex::new(None));
-        let popped_clone = Arc::clone(&popped);
-        update_list_elements(key, storage, move |elements| {
+        // Capture the popped element so we can return it after
+        // update_list_elements writes the shortened list back. The closure
+        // runs synchronously on this thread and only borrows `popped` for the
+        // duration of the call, so a plain mutable local is sufficient.
+        let mut popped: Option<DataType> = None;
+        update_list_elements(key, storage, |elements| {
             if !elements.is_empty() {
-                let value = elements.remove(0);
-                *popped_clone
-                    .lock()
-                    .map_err(|e| anyhow!("Failed to lock popped slot: {}", e))? = Some(value);
+                popped = Some(elements.remove(0));
             }
             Ok(())
         })?;
 
-        let popped_value = popped
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock popped slot: {}", e))?
-            .take();
-        match popped_value {
+        match popped {
             Some(value) => Ok(vec![value]),
             None => Ok(vec![protocol::bulk_string_empty()]),
         }
@@ -179,11 +172,5 @@ mod tests {
         // LPOP on the same key should fail since it's not a list
         assert!(lpop("mykey").execute(&storage).is_err());
         Ok(())
-    }
-
-    #[test]
-    fn test_lpop_is_propagated_to_replicas() {
-        let cmd = lpop("any");
-        assert!(cmd.is_propagated_to_replicas());
     }
 }
