@@ -1,15 +1,22 @@
-/// LPOP command - removes and returns the first element of a list stored at key.
+/// LPOP command - removes and returns one or more first elements of a list
+/// stored at key.
 ///
-/// Syntax: LPOP <key>
+/// Syntax: LPOP <key> [count]
 ///
-/// If the key does not exist or the list is empty, a null bulk string is
-/// returned.
+/// Without `count` the command behaves as a single-element pop:
+/// returns a bulk string with the removed value, or a null bulk string if the
+/// key does not exist (or the list is empty).
 ///
-/// Returns: Bulk string reply - the removed element, or a null bulk string if
-/// the key does not exist or the list is empty.
+/// With `count` (a non-negative integer) the command removes up to `count`
+/// elements from the head of the list and returns them as a RESP array, in the
+/// order they were removed. If `count` exceeds the list length, all elements
+/// are removed and returned. If the key does not exist (or the list is empty)
+/// an empty RESP array is returned.
 ///
 /// Errors:
-///   Returns an error if the value stored at key is not a list.
+///   Returns an error if the value stored at key is not a list, if the
+///   `count` argument cannot be parsed as an integer, or if `count` is
+///   negative.
 
 use std::sync::{Arc, Mutex};
 use log::*;
@@ -32,29 +39,45 @@ impl RedisCommand for LPop {
             message: "Invalid LPOP command syntax".to_string(),
         };
 
-        let key = instructions.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
-        if instructions.len() != 2 {
+        if instructions.len() < 2 || instructions.len() > 3 {
             return Err(error.clone().into());
         }
+        let key = instructions.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
 
-        debug!("LPOP {}", key);
+        // Parse the optional count argument. `None` keeps the legacy
+        // single-element bulk-string return shape; `Some(n)` switches to the
+        // array reply shape with up to `n` elements.
+        let count: Option<usize> = instructions
+            .get(2)
+            .map(|value_str| {
+                let parsed: i64 = value_str.parse().map_err(|_| error.clone())?;
+                usize::try_from(parsed).map_err(|_| error.clone())
+            })
+            .transpose()?;
 
-        // Capture the popped element so we can return it after
+        debug!("LPOP {} {:?}", key, count);
+
+        // Capture the popped elements so we can return them after
         // update_list_elements writes the shortened list back. The closure
         // runs synchronously on this thread and only borrows `popped` for the
         // duration of the call, so a plain mutable local is sufficient.
-        let mut popped: Option<DataType> = None;
+        let mut popped: Vec<DataType> = Vec::new();
+        let total_count_to_pop = count.unwrap_or(1);
         update_list_elements(key, storage, |elements| {
-            if !elements.is_empty() {
-                popped = Some(elements.remove(0));
-            }
+            let n = total_count_to_pop.min(elements.len());
+            popped = elements.drain(..n).collect();
             Ok(())
         })?;
 
-        match popped {
-            Some(value) => Ok(vec![value]),
-            None => Ok(vec![protocol::bulk_string_empty()]),
-        }
+        // Legacy single-element form returns a bulk string (or null bulk string
+        // when nothing was popped); the multi-element form always replies with
+        // a RESP array, even when empty (`*0\r\n`).
+        let reply = if count.is_some() {
+            protocol::array(popped)
+        } else {
+            popped.into_iter().next().unwrap_or_else(protocol::bulk_string_empty)
+        };
+        Ok(vec![reply])
     }
 
     fn is_propagated_to_replicas(&self) -> bool {
@@ -80,6 +103,15 @@ mod tests {
         let msg = protocol::array(vec![
             protocol::bulk_string("LPOP"),
             protocol::bulk_string(key),
+        ]);
+        LPop { message: msg }
+    }
+
+    fn lpop_n(key: &str, count: i64) -> LPop {
+        let msg = protocol::array(vec![
+            protocol::bulk_string("LPOP"),
+            protocol::bulk_string(key),
+            protocol::bulk_string(&count.to_string()),
         ]);
         LPop { message: msg }
     }
@@ -147,13 +179,113 @@ mod tests {
         let msg1 = protocol::array(vec![protocol::bulk_string("LPOP")]);
         assert!(LPop { message: msg1 }.execute(&storage).is_err());
 
-        // Too many arguments (count argument is not yet supported)
+        // Too many arguments (only one optional count is supported)
         let msg2 = protocol::array(vec![
             protocol::bulk_string("LPOP"),
             protocol::bulk_string("mylist"),
             protocol::bulk_string("2"),
+            protocol::bulk_string("extra"),
         ]);
         assert!(LPop { message: msg2 }.execute(&storage).is_err());
+
+        // Non-integer count
+        let msg3 = protocol::array(vec![
+            protocol::bulk_string("LPOP"),
+            protocol::bulk_string("mylist"),
+            protocol::bulk_string("notanumber"),
+        ]);
+        assert!(LPop { message: msg3 }.execute(&storage).is_err());
+
+        // Negative count is rejected
+        let msg4 = protocol::array(vec![
+            protocol::bulk_string("LPOP"),
+            protocol::bulk_string("mylist"),
+            protocol::bulk_string("-1"),
+        ]);
+        assert!(LPop { message: msg4 }.execute(&storage).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_lpop_with_count_removes_and_returns_array() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let key = "mylist";
+        let values = vec!["one", "two", "three", "four", "five"];
+        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
+        set_list_values(&storage, key, &elements)?;
+
+        // LPOP key 2 -> array ["one", "two"], remainder ["three", "four", "five"]
+        let result = lpop_n(key, 2).execute(&storage)?;
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0],
+            protocol::array(vec![
+                protocol::bulk_string("one"),
+                protocol::bulk_string("two"),
+            ])
+        );
+
+        assert_eq!(
+            read_list(&storage, key)?,
+            vec!["three", "four", "five"],
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_lpop_with_count_greater_than_length_drains_list() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let key = "mylist";
+        let values = vec!["a", "b", "c"];
+        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
+        set_list_values(&storage, key, &elements)?;
+
+        // LPOP key 10 on a 3-element list returns all 3 elements, list is empty after.
+        let result = lpop_n(key, 10).execute(&storage)?;
+        assert_eq!(
+            result[0],
+            protocol::array(vec![
+                protocol::bulk_string("a"),
+                protocol::bulk_string("b"),
+                protocol::bulk_string("c"),
+            ])
+        );
+        assert!(read_list(&storage, key)?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_lpop_with_count_zero_returns_empty_array() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let key = "mylist";
+        let values = vec!["a", "b"];
+        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
+        set_list_values(&storage, key, &elements)?;
+
+        // LPOP key 0 removes nothing and returns an empty array.
+        let result = lpop_n(key, 0).execute(&storage)?;
+        assert_eq!(result[0], protocol::array(Vec::new()));
+        assert_eq!(read_list(&storage, key)?, vec!["a", "b"]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_lpop_with_count_on_empty_list_returns_empty_array() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let key = "mylist";
+        set_list_values(&storage, key, &Vec::new())?;
+
+        let result = lpop_n(key, 3).execute(&storage)?;
+        assert_eq!(result[0], protocol::array(Vec::new()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_lpop_with_count_on_missing_key_returns_empty_array() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+
+        let result = lpop_n("missing_list_key", 4).execute(&storage)?;
+        assert_eq!(result[0], protocol::array(Vec::new()));
         Ok(())
     }
 

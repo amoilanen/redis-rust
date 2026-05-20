@@ -237,6 +237,67 @@ fn test_lpop_drains_list_then_returns_nil() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_lpop_with_count_returns_array_of_removed_elements() -> Result<()> {
+    // Validates the wire encoding for `LPOP key count`: the response is a
+    // RESP array (`*N\r\n...`) of bulk strings in the order they were
+    // removed. Mirrors the example from the task description verbatim.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(
+        client.send_command(&["RPUSH", "list_key", "one", "two", "three", "four", "five"])?,
+        "5"
+    );
+
+    let resp = client.send_command(&["LPOP", "list_key", "2"])?;
+    assert_eq!(resp, "one,two");
+
+    // The list should still contain the remaining three elements in order.
+    let resp = client.send_command(&["LRANGE", "list_key", "0", "-1"])?;
+    assert_eq!(resp, "three,four,five");
+    Ok(())
+}
+
+#[test]
+fn test_lpop_with_count_greater_than_length_drains_list() -> Result<()> {
+    // When `count` exceeds the list length the command removes everything
+    // and returns an array of all popped elements; the list is now empty.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["RPUSH", "list_key", "a", "b", "c"])?, "3");
+
+    let resp = client.send_command(&["LPOP", "list_key", "10"])?;
+    assert_eq!(resp, "a,b,c");
+
+    // List is empty after the drain.
+    assert_eq!(client.send_command(&["LLEN", "list_key"])?, "0");
+    assert_eq!(client.send_command(&["LRANGE", "list_key", "0", "-1"])?, "");
+    Ok(())
+}
+
+#[test]
+fn test_lpop_with_count_zero_returns_empty_array() -> Result<()> {
+    // `LPOP key 0` is a no-op that still has to reply with an empty RESP
+    // array (`*0\r\n`), surfaced as an empty string by the test client.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["RPUSH", "list_key", "a", "b"])?, "2");
+
+    let resp = client.send_command(&["LPOP", "list_key", "0"])?;
+    assert_eq!(resp, "");
+
+    // The list itself is untouched.
+    let resp = client.send_command(&["LRANGE", "list_key", "0", "-1"])?;
+    assert_eq!(resp, "a,b");
+    Ok(())
+}
+
 // ========================= Concurrent clients =========================
 
 #[test]

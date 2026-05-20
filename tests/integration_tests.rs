@@ -628,5 +628,36 @@ fn e2e_list_commands_public_api_smoke_test() -> Result<()> {
     }
     .execute(&storage)?;
     assert_eq!(r8[0], protocol::bulk_string_empty());
+
+    // LPOP with a count argument returns a RESP array of the popped
+    // elements. The list "k" currently holds [b, x, y]; popping 2 yields
+    // ["b", "x"] and leaves ["y"] behind.
+    let r9 = LPop {
+        message: protocol::array(vec![
+            protocol::bulk_string("LPOP"),
+            protocol::bulk_string("k"),
+            protocol::bulk_string("2"),
+        ]),
+    }
+    .execute(&storage)?;
+    assert_eq!(
+        r9[0],
+        protocol::array(vec![protocol::bulk_string("b"), protocol::bulk_string("x")])
+    );
+
+    // Confirm the count form actually mutated shared storage.
+    let r10 = LRange {
+        message: protocol::array(vec![
+            protocol::bulk_string("LRANGE"),
+            protocol::bulk_string("k"),
+            protocol::integer(0),
+            protocol::integer(-1),
+        ]),
+    }
+    .execute(&storage)?;
+    assert_eq!(
+        r10[0],
+        protocol::array(vec![protocol::bulk_string("y")])
+    );
     Ok(())
 }
