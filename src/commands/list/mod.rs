@@ -9,25 +9,29 @@
 /// outside the list family.
 
 use std::sync::{Arc, Mutex};
-use log::*;
-use anyhow::anyhow;
 
+use anyhow::{Result, anyhow};
+use log::*;
+
+use crate::blocking::BlockingNotifier;
+use crate::error::RedisError;
 use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
-use crate::error::RedisError;
 
 pub mod rpush;
 pub mod lpush;
 pub mod lrange;
 pub mod llen;
 pub mod lpop;
+pub mod blpop;
 
 pub use rpush::RPush;
 pub use lpush::LPush;
 pub use lrange::LRange;
 pub use llen::LLen;
 pub use lpop::LPop;
+pub use blpop::BLPop;
 
 /// Read the list stored at `key` from `storage`.
 ///
@@ -37,7 +41,7 @@ pub use lpop::LPop;
 fn get_list_elements(
     key: &str,
     storage: &Arc<Mutex<Storage>>,
-) -> Result<Vec<DataType>, anyhow::Error> {
+) -> Result<Vec<DataType>> {
     let mut data = storage
         .lock()
         .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
@@ -57,15 +61,23 @@ fn get_list_elements(
 ///
 /// Loads the list (creating an empty one if missing), hands a mutable
 /// reference to the closure `f`, and writes the resulting list back to
-/// storage. Returns the updated elements so callers can compute a length
-/// or any other derived value.
-fn update_list_elements<F>(
+/// storage. The closure's return value is propagated to the caller so the
+/// closure can hand back arbitrary derived data (e.g. the elements that
+/// were popped, the post-mutation length, or — in BLPOP's case — a
+/// `Receiver` for a freshly registered waiter).
+///
+/// The storage `Mutex` is held for the entire span: read, mutate, and
+/// write-back. This is what lets BLPOP register a waiter inside `f` while
+/// guaranteeing a concurrent pusher either sees the unmodified list (and
+/// won't try to hand off yet) or sees the registered waiter under its own
+/// lock acquisition.
+fn update_list_elements<F, T>(
     key: &str,
     storage: &Arc<Mutex<Storage>>,
     f: F,
-) -> Result<Vec<DataType>, anyhow::Error>
+) -> Result<T>
 where
-    F: FnOnce(&mut Vec<DataType>) -> Result<(), anyhow::Error>,
+    F: FnOnce(&mut Vec<DataType>) -> Result<T>,
 {
     let mut data = storage
         .lock()
@@ -79,24 +91,25 @@ where
         None => Ok(Vec::new()),
         Some(_) => Err(anyhow!("Not an Array is stored in storage")),
     }?;
-    f(&mut stored_elements)?;
-    data.set(key, protocol::array(stored_elements.clone()).serialize(), None)?;
-    Ok(stored_elements)
+    let result = f(&mut stored_elements)?;
+    data.set(key, protocol::array(stored_elements).serialize(), None)?;
+    Ok(result)
 }
 
 /// Shared implementation for list-push commands (RPUSH / LPUSH).
 ///
-/// Parses `<COMMAND> <key> <value> [value ...]` from `message`, then for each
-/// supplied value invokes `push_fn(elements, value)` to mutate the stored list.
-/// Returns the new length of the list as a single RESP integer.
-///
-/// `command_name` is only used for error messages and debug logs.
+/// Parses `<COMMAND> <key> <value> [value ...]`, applies `push_fn` for each
+/// supplied value, then hands off head elements to any BLPOP waiters while
+/// still holding the storage lock so push + wake-up are atomic. Returns
+/// the post-push, pre-handoff length — `RPUSH k foo` against one waiter
+/// still reports `1` even though the handoff immediately drains the list.
 fn push_to_list<F>(
     message: &DataType,
     storage: &Arc<Mutex<Storage>>,
+    notifier: &Arc<BlockingNotifier>,
     command_name: &str,
     push_fn: F,
-) -> Result<Vec<DataType>, anyhow::Error>
+) -> Result<Vec<DataType>>
 where
     F: Fn(&mut Vec<DataType>, &str),
 {
@@ -113,13 +126,15 @@ where
 
     debug!("{} {} {:?}", command_name, key, values);
 
-    let updated_elements = update_list_elements(key, storage, |elements| {
+    let len_after_push = update_list_elements(key, storage, |elements| {
         for value in values {
             push_fn(elements, value);
         }
-        Ok(())
+        let len = elements.len() as i64;
+        notifier.handoff(key, elements)?;
+        Ok(len)
     })?;
-    Ok(vec![protocol::integer(updated_elements.len() as i64)])
+    Ok(vec![protocol::integer(len_after_push)])
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +150,11 @@ fn create_test_storage() -> Arc<Mutex<Storage>> {
     Arc::new(Mutex::new(Storage::new(HashMap::new())))
 }
 
+#[cfg(test)]
+fn create_test_notifier() -> Arc<BlockingNotifier> {
+    Arc::new(BlockingNotifier::new())
+}
+
 /// Seed `storage` with a list at `key` containing the given `elements`.
 ///
 /// Writes the values as a RESP-serialized Array so that `get_list_elements`
@@ -144,7 +164,7 @@ fn set_list_values(
     storage: &Arc<Mutex<Storage>>,
     key: &str,
     elements: &[DataType],
-) -> anyhow::Result<()> {
+) -> Result<()> {
     storage
         .lock()
         .map_err(|e| anyhow!("Failed to lock storage: {}", e))?
@@ -159,7 +179,7 @@ fn set_list_values(
 fn read_list(
     storage: &Arc<Mutex<Storage>>,
     key: &str,
-) -> anyhow::Result<Vec<String>> {
+) -> Result<Vec<String>> {
     let raw = storage
         .lock()
         .map_err(|e| anyhow!("Failed to lock storage: {}", e))?

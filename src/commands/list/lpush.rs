@@ -13,20 +13,23 @@
 ///   Returns an error if the value stored at key is not a list.
 
 use std::sync::{Arc, Mutex};
+
+use super::push_to_list;
+use crate::blocking::BlockingNotifier;
+use crate::commands::RedisCommand;
 use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
-use crate::commands::RedisCommand;
-use super::push_to_list;
 
 /// LPUSH command implementation.
 pub struct LPush {
     pub message: DataType,
+    pub notifier: Arc<BlockingNotifier>,
 }
 
 impl RedisCommand for LPush {
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
-        push_to_list(&self.message, storage, "LPUSH", |elements, value| {
+        push_to_list(&self.message, storage, &self.notifier, "LPUSH", |elements, value| {
             elements.insert(0, protocol::bulk_string(value));
         })
     }
@@ -47,7 +50,7 @@ impl RedisCommand for LPush {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{create_test_storage, read_list};
+    use super::super::{create_test_notifier, create_test_storage, read_list};
     use crate::commands::set::Set;
 
     fn lpush_msg(key: &str, values: &[&str]) -> DataType {
@@ -61,15 +64,20 @@ mod tests {
         protocol::array(parts)
     }
 
+    fn lpush(message: DataType, notifier: &Arc<BlockingNotifier>) -> LPush {
+        LPush { message, notifier: Arc::clone(notifier) }
+    }
+
     #[test]
     fn test_lpush_creates_and_prepends() -> anyhow::Result<()> {
         let storage = create_test_storage();
+        let notifier = create_test_notifier();
 
         // Single-value pushes accumulate at the head: pushing "one", "two", "three"
         // one at a time should result in ["three", "two", "one"].
         let values = vec!["one", "two", "three"];
         for (i, value) in values.iter().enumerate() {
-            let cmd = LPush { message: lpush_msg("mylist", &[value]) };
+            let cmd = lpush(lpush_msg("mylist", &[value]), &notifier);
             let result = cmd.execute(&storage)?;
             assert_eq!(result.len(), 1);
             assert_eq!(result[0].as_string()?, (i + 1).to_string());
@@ -86,10 +94,11 @@ mod tests {
     #[test]
     fn test_lpush_multiple_elements_reverse_order() -> anyhow::Result<()> {
         let storage = create_test_storage();
+        let notifier = create_test_notifier();
 
         // Create new list with multiple elements - they should be inserted in
         // reverse order, so "a", "b", "c" becomes ["c", "b", "a"].
-        let result1 = LPush { message: lpush_msg("mylist", &["a", "b", "c"]) }.execute(&storage)?;
+        let result1 = lpush(lpush_msg("mylist", &["a", "b", "c"]), &notifier).execute(&storage)?;
         assert_eq!(result1.len(), 1);
         assert_eq!(result1[0].as_string()?, "3");
 
@@ -99,7 +108,7 @@ mod tests {
         );
 
         // Prepend more elements to existing list. "d", "e" -> head becomes ["e", "d", ...].
-        let result2 = LPush { message: lpush_msg("mylist", &["d", "e"]) }.execute(&storage)?;
+        let result2 = lpush(lpush_msg("mylist", &["d", "e"]), &notifier).execute(&storage)?;
         assert_eq!(result2.len(), 1);
         assert_eq!(result2[0].as_string()?, "5");
 
@@ -113,23 +122,25 @@ mod tests {
     #[test]
     fn test_lpush_invalid_syntax() -> anyhow::Result<()> {
         let storage = create_test_storage();
+        let notifier = create_test_notifier();
 
         // Missing both key and value
         let msg1 = protocol::array(vec![protocol::bulk_string("LPUSH")]);
-        assert!(LPush { message: msg1 }.execute(&storage).is_err());
+        assert!(lpush(msg1, &notifier).execute(&storage).is_err());
 
         // Missing value
         let msg2 = protocol::array(vec![
             protocol::bulk_string("LPUSH"),
             protocol::bulk_string("mylist"),
         ]);
-        assert!(LPush { message: msg2 }.execute(&storage).is_err());
+        assert!(lpush(msg2, &notifier).execute(&storage).is_err());
         Ok(())
     }
 
     #[test]
     fn test_lpush_wrong_type_fails() -> anyhow::Result<()> {
         let storage = create_test_storage();
+        let notifier = create_test_notifier();
 
         // Store a plain string value using SET
         let set_msg = protocol::array(vec![
@@ -140,21 +151,22 @@ mod tests {
         Set { message: set_msg }.execute(&storage)?;
 
         // LPUSH to the same key should fail since it's not a list
-        assert!(LPush { message: lpush_msg("mykey", &["value"]) }.execute(&storage).is_err());
+        assert!(lpush(lpush_msg("mykey", &["value"]), &notifier).execute(&storage).is_err());
         Ok(())
     }
 
     #[test]
     fn test_lpush_single_then_multi() -> anyhow::Result<()> {
         let storage = create_test_storage();
+        let notifier = create_test_notifier();
 
         // Single push to a fresh key
-        let r1 = LPush { message: lpush_msg("k", &["c"]) }.execute(&storage)?;
+        let r1 = lpush(lpush_msg("k", &["c"]), &notifier).execute(&storage)?;
         assert_eq!(r1[0].as_string()?, "1");
         assert_eq!(read_list(&storage, "k")?, vec!["c"]);
 
         // Multi push - "b", "a" should be inserted as head ["a", "b", ...]
-        let r2 = LPush { message: lpush_msg("k", &["b", "a"]) }.execute(&storage)?;
+        let r2 = lpush(lpush_msg("k", &["b", "a"]), &notifier).execute(&storage)?;
         assert_eq!(r2[0].as_string()?, "3");
         assert_eq!(read_list(&storage, "k")?, vec!["a", "b", "c"]);
         Ok(())

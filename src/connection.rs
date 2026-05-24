@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::protocol::DataType;
 use crate::io;
-use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop};
+use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop};
 use crate::storage::Storage;
 use crate::server_state::ServerState;
 
@@ -86,11 +86,13 @@ pub fn handle_connection(
                         }));
                     } else if command_name == "RPUSH" {
                         command = Some(Box::new(RPush {
-                            message: received_message.clone()
+                            message: received_message.clone(),
+                            notifier: Arc::clone(&server_state.blocking_notifier),
                         }));
                     } else if command_name == "LPUSH" {
                         command = Some(Box::new(LPush {
-                            message: received_message.clone()
+                            message: received_message.clone(),
+                            notifier: Arc::clone(&server_state.blocking_notifier),
                         }));
                     } else if command_name == "LRANGE" {
                         command = Some(Box::new(LRange {
@@ -103,6 +105,11 @@ pub fn handle_connection(
                     } else if command_name == "LPOP" {
                         command = Some(Box::new(LPop {
                             message: received_message.clone()
+                        }));
+                    } else if command_name == "BLPOP" {
+                        command = Some(Box::new(BLPop {
+                            message: received_message.clone(),
+                            notifier: Arc::clone(&server_state.blocking_notifier),
                         }));
                     } else if command_name == "PSYNC" {
                         command = Some(Box::new(PSync {

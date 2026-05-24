@@ -57,16 +57,13 @@ impl RedisCommand for LPop {
 
         debug!("LPOP {} {:?}", key, count);
 
-        // Capture the popped elements so we can return them after
-        // update_list_elements writes the shortened list back. The closure
-        // runs synchronously on this thread and only borrows `popped` for the
-        // duration of the call, so a plain mutable local is sufficient.
-        let mut popped: Vec<DataType> = Vec::new();
+        // `update_list_elements` writes the shortened list back to storage
+        // and propagates the closure's return value — here, the elements we
+        // drained from the front.
         let total_count_to_pop = count.unwrap_or(1);
-        update_list_elements(key, storage, |elements| {
+        let popped: Vec<DataType> = update_list_elements(key, storage, |elements| {
             let n = total_count_to_pop.min(elements.len());
-            popped = elements.drain(..n).collect();
-            Ok(())
+            Ok(elements.drain(..n).collect())
         })?;
 
         // Legacy single-element form returns a bulk string (or null bulk string

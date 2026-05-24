@@ -2,6 +2,7 @@ use std::net::TcpStream;
 
 use std::sync::{Arc, Mutex};
 use rand::Rng;
+use crate::blocking::BlockingNotifier;
 use crate::error::RedisError;
 
 pub struct ServerState {
@@ -9,7 +10,8 @@ pub struct ServerState {
     pub replica_of: Option<String>,
     pub master_replication_id: Option<String>,
     pub master_replication_offset: Option<usize>,
-    pub replica_connections: Arc<Mutex<Vec<TcpStream>>>
+    pub replica_connections: Arc<Mutex<Vec<TcpStream>>>,
+    pub blocking_notifier: Arc<BlockingNotifier>,
 }
 
 impl ServerState {
@@ -49,6 +51,7 @@ impl ServerState {
     }
 
     pub fn new<'a>(replica_of: Option<String>, port: usize) -> ServerState {
+        let blocking = Arc::new(BlockingNotifier::new());
         match replica_of {
             Some(replica_of) =>
                 ServerState {
@@ -56,7 +59,8 @@ impl ServerState {
                     replica_of: Some(replica_of),
                     master_replication_id: None,
                     master_replication_offset: None,
-                    replica_connections: Arc::new(Mutex::new(Vec::new()))
+                    replica_connections: Arc::new(Mutex::new(Vec::new())),
+                    blocking_notifier: blocking,
                 },
             None =>
                 ServerState {
@@ -64,7 +68,8 @@ impl ServerState {
                     replica_of: None,
                     master_replication_id: Some(ServerState::generate_replication_id()),
                     master_replication_offset: Some(0),
-                    replica_connections: Arc::new(Mutex::new(Vec::new()))
+                    replica_connections: Arc::new(Mutex::new(Vec::new())),
+                    blocking_notifier: blocking,
                 }
         }
     }

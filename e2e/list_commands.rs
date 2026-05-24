@@ -8,6 +8,9 @@
 
 mod common;
 
+use std::thread;
+use std::time::Duration;
+
 use anyhow::Result;
 use common::{free_port, ServerProcess};
 
@@ -295,6 +298,76 @@ fn test_lpop_with_count_zero_returns_empty_array() -> Result<()> {
     // The list itself is untouched.
     let resp = client.send_command(&["LRANGE", "list_key", "0", "-1"])?;
     assert_eq!(resp, "a,b");
+    Ok(())
+}
+
+// ========================= BLPOP =========================
+
+#[test]
+fn test_blpop_returns_immediately_when_list_non_empty() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["RPUSH", "list_key", "foo"])?, "1");
+
+    let resp = client.send_command(&["BLPOP", "list_key", "0"])?;
+    assert_eq!(resp, "list_key,foo");
+    Ok(())
+}
+
+#[test]
+fn test_blpop_blocks_until_rpush_wakes_it() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+
+    let mut waiter = server.client();
+    let mut pusher = server.client();
+
+    let handle = thread::spawn(move || waiter.send_command(&["BLPOP", "list_key", "0"]));
+
+    // Let the BLPOP register before we push, so the blocking path is exercised.
+    thread::sleep(Duration::from_millis(200));
+
+    // RPUSH reports the post-push, pre-handoff length (1) even though the
+    // value is handed straight to the waiter.
+    let push_resp = pusher.send_command(&["RPUSH", "list_key", "foo"])?;
+    assert_eq!(push_resp, "1");
+
+    let blpop_resp = handle.join().expect("waiter thread panicked")?;
+    assert_eq!(blpop_resp, "list_key,foo");
+
+    assert_eq!(pusher.send_command(&["LLEN", "list_key"])?, "0");
+    Ok(())
+}
+
+#[test]
+fn test_blpop_serves_multiple_clients_in_fifo_order() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+
+    let mut waiter_a = server.client();
+    let mut waiter_b = server.client();
+    let mut pusher = server.client();
+
+    let ha = thread::spawn(move || waiter_a.send_command(&["BLPOP", "another_list_key", "0"]));
+    thread::sleep(Duration::from_millis(150));
+    let hb = thread::spawn(move || waiter_b.send_command(&["BLPOP", "another_list_key", "0"]));
+    thread::sleep(Duration::from_millis(150));
+
+    assert_eq!(
+        pusher.send_command(&["RPUSH", "another_list_key", "foo"])?,
+        "1"
+    );
+    let resp_a = ha.join().expect("waiter A panicked")?;
+    assert_eq!(resp_a, "another_list_key,foo");
+
+    assert_eq!(
+        pusher.send_command(&["RPUSH", "another_list_key", "bar"])?,
+        "1"
+    );
+    let resp_b = hb.join().expect("waiter B panicked")?;
+    assert_eq!(resp_b, "another_list_key,bar");
     Ok(())
 }
 

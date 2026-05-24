@@ -26,7 +26,7 @@ pub use get::Get;
 pub use info::Info;
 pub use replconf::ReplConf;
 pub use psync::PSync;
-pub use list::{RPush, LPush, LRange, LLen, LPop};
+pub use list::{RPush, LPush, LRange, LLen, LPop, BLPop};
 
 /// Trait for implementing Redis commands.
 ///

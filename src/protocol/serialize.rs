@@ -88,6 +88,9 @@ impl DataType {
             &DataType::Array { elements } => {
                 result = serialize_array_like(&elements, b'*')
             },
+            &DataType::NullArray => {
+                result.extend("*-1\r\n".as_bytes())
+            },
             &DataType::Push { elements } => {
                 result = serialize_array_like(&elements, b'>')
             },
@@ -217,6 +220,11 @@ mod tests {
             ]
         }.serialize()), "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".to_string());
         Ok(())
+    }
+
+    #[test]
+    fn should_serialize_null_array() {
+        assert_eq!(String::from_utf8_lossy(&DataType::NullArray.serialize()), "*-1\r\n");
     }
 
     #[test]

@@ -11,20 +11,23 @@
 ///   Returns an error if the value stored at key is not a list.
 
 use std::sync::{Arc, Mutex};
+
+use super::push_to_list;
+use crate::blocking::BlockingNotifier;
+use crate::commands::RedisCommand;
 use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
-use crate::commands::RedisCommand;
-use super::push_to_list;
 
 /// RPUSH command implementation.
 pub struct RPush {
     pub message: DataType,
+    pub notifier: Arc<BlockingNotifier>,
 }
 
 impl RedisCommand for RPush {
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
-        push_to_list(&self.message, storage, "RPUSH", |elements, value| {
+        push_to_list(&self.message, storage, &self.notifier, "RPUSH", |elements, value| {
             elements.push(protocol::bulk_string(value));
         })
     }
@@ -45,12 +48,13 @@ impl RedisCommand for RPush {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{create_test_storage, read_list};
+    use super::super::{create_test_notifier, create_test_storage, read_list};
     use crate::commands::set::Set;
 
     #[test]
     fn test_rpush_creates_and_appends() -> anyhow::Result<()> {
         let storage = create_test_storage();
+        let notifier = create_test_notifier();
 
         let values = vec!["one", "two", "three"];
         for (i, value) in values.iter().enumerate() {
@@ -59,7 +63,7 @@ mod tests {
                 protocol::bulk_string("mylist"),
                 protocol::bulk_string(value),
             ]);
-            let cmd = RPush { message: msg };
+            let cmd = RPush { message: msg, notifier: Arc::clone(&notifier) };
             let result = cmd.execute(&storage)?;
             assert_eq!(result.len(), 1);
             assert_eq!(result[0].as_string()?, (i + 1).to_string());
@@ -71,6 +75,7 @@ mod tests {
     #[test]
     fn test_rpush_multiple_elements() -> anyhow::Result<()> {
         let storage = create_test_storage();
+        let notifier = create_test_notifier();
 
         // Create new list with multiple elements
         let msg1 = protocol::array(vec![
@@ -80,7 +85,7 @@ mod tests {
             protocol::bulk_string("element2"),
             protocol::bulk_string("element3"),
         ]);
-        let result1 = RPush { message: msg1 }.execute(&storage)?;
+        let result1 = RPush { message: msg1, notifier: Arc::clone(&notifier) }.execute(&storage)?;
         assert_eq!(result1.len(), 1);
         assert_eq!(result1[0].as_string()?, "3");
 
@@ -97,7 +102,7 @@ mod tests {
             protocol::bulk_string("element4"),
             protocol::bulk_string("element5"),
         ]);
-        let result2 = RPush { message: msg2 }.execute(&storage)?;
+        let result2 = RPush { message: msg2, notifier: Arc::clone(&notifier) }.execute(&storage)?;
         assert_eq!(result2.len(), 1);
         assert_eq!(result2[0].as_string()?, "5");
 
@@ -112,23 +117,25 @@ mod tests {
     #[test]
     fn test_rpush_invalid_syntax() -> anyhow::Result<()> {
         let storage = create_test_storage();
+        let notifier = create_test_notifier();
 
         // Missing both key and value
         let msg1 = protocol::array(vec![protocol::bulk_string("RPUSH")]);
-        assert!(RPush { message: msg1 }.execute(&storage).is_err());
+        assert!(RPush { message: msg1, notifier: Arc::clone(&notifier) }.execute(&storage).is_err());
 
         // Missing value
         let msg2 = protocol::array(vec![
             protocol::bulk_string("RPUSH"),
             protocol::bulk_string("mylist"),
         ]);
-        assert!(RPush { message: msg2 }.execute(&storage).is_err());
+        assert!(RPush { message: msg2, notifier: Arc::clone(&notifier) }.execute(&storage).is_err());
         Ok(())
     }
 
     #[test]
     fn test_rpush_wrong_type_fails() -> anyhow::Result<()> {
         let storage = create_test_storage();
+        let notifier = create_test_notifier();
 
         // Store a plain string value using SET
         let set_msg = protocol::array(vec![
@@ -144,7 +151,7 @@ mod tests {
             protocol::bulk_string("mykey"),
             protocol::bulk_string("value"),
         ]);
-        assert!(RPush { message: rpush_msg }.execute(&storage).is_err());
+        assert!(RPush { message: rpush_msg, notifier: Arc::clone(&notifier) }.execute(&storage).is_err());
         Ok(())
     }
 }

@@ -8,6 +8,7 @@
 /// - Complex real-world scenarios
 
 use anyhow::Result;
+use codecrafters_redis::blocking::BlockingNotifier;
 use codecrafters_redis::commands::*;
 use codecrafters_redis::protocol;
 use codecrafters_redis::protocol::DataType;
@@ -534,6 +535,7 @@ fn e2e_rate_limiting_with_expiration() -> Result<()> {
 #[test]
 fn e2e_list_commands_public_api_smoke_test() -> Result<()> {
     let storage = create_test_storage();
+    let notifier = Arc::new(BlockingNotifier::new());
 
     // RPUSH appends two values: list is now ["x", "y"], length 2.
     let r1 = RPush {
@@ -543,6 +545,7 @@ fn e2e_list_commands_public_api_smoke_test() -> Result<()> {
             protocol::bulk_string("x"),
             protocol::bulk_string("y"),
         ]),
+        notifier: Arc::clone(&notifier),
     }
     .execute(&storage)?;
     assert_eq!(r1[0].as_string()?, "2");
@@ -555,6 +558,7 @@ fn e2e_list_commands_public_api_smoke_test() -> Result<()> {
             protocol::bulk_string("b"),
             protocol::bulk_string("a"),
         ]),
+        notifier: Arc::clone(&notifier),
     }
     .execute(&storage)?;
     assert_eq!(r2[0].as_string()?, "4");
@@ -658,6 +662,24 @@ fn e2e_list_commands_public_api_smoke_test() -> Result<()> {
     assert_eq!(
         r10[0],
         protocol::array(vec![protocol::bulk_string("y")])
+    );
+
+    // BLPOP on a non-empty list takes the immediate-pop path.
+    let r11 = BLPop {
+        message: protocol::array(vec![
+            protocol::bulk_string("BLPOP"),
+            protocol::bulk_string("k"),
+            protocol::bulk_string("0"),
+        ]),
+        notifier: Arc::clone(&notifier),
+    }
+    .execute(&storage)?;
+    assert_eq!(
+        r11[0],
+        protocol::array(vec![
+            protocol::bulk_string("k"),
+            protocol::bulk_string("y"),
+        ])
     );
     Ok(())
 }

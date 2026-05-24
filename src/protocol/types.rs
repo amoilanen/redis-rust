@@ -38,6 +38,7 @@ pub enum DataType {
     Array {
         elements: Vec<DataType>
     },
+    NullArray,
     Push {
         elements: Vec<DataType>
     },
@@ -79,6 +80,10 @@ pub fn bulk_string(value: &str) -> DataType {
 
 pub fn array(elements: Vec<DataType>) -> DataType {
     DataType::Array { elements }
+}
+
+pub fn null_array() -> DataType {
+    DataType::NullArray
 }
 
 pub fn integer(value: i64) -> DataType {
@@ -206,6 +211,9 @@ impl DataType {
                     result.extend(element.as_string()?.as_bytes());
                     result.push(b',');
                 }
+            },
+            &DataType::NullArray => {
+                result.extend("".as_bytes().to_vec())
             },
             &DataType::Push { elements } => {
                 for element in elements.iter() {

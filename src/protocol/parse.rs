@@ -217,6 +217,10 @@ fn parse_array_like(input: &[u8], position: usize) -> Result<(Vec<DataType>, usi
 }
 
 fn parse_array(input: &[u8], position: usize) -> Result<(DataType, usize), anyhow::Error> {
+    let (length_bytes, after_length) = parse_simple_line(input, position + 1)?;
+    if length_bytes == b"-1" {
+        return Ok((DataType::NullArray, after_length));
+    }
     let (elements, new_pos) = parse_array_like(input, position)?;
     Ok((DataType::Array { elements }, new_pos))
 }
@@ -342,8 +346,14 @@ mod tests {
     }
 
     #[test]
+    fn should_parse_null_array() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(DataType::parse(&"*-1\r\n".as_bytes().to_vec(), 0)?.0, DataType::NullArray);
+        Ok(())
+    }
+
+    #[test]
     fn should_parse_array() -> Result<(), Box<dyn std::error::Error>> {
-        let mut parsed = DataType::parse(&"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0)?;
+        let parsed = DataType::parse(&"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".as_bytes().to_vec(), 0)?;
         assert_eq!(parsed.0, DataType::Array {
             elements: vec![
                 DataType::BulkString {
@@ -355,10 +365,6 @@ mod tests {
             ]
         });
         assert_eq!(parsed.1, 26);
-
-        parsed = DataType::parse(&"*-1\r\n".as_bytes().to_vec(), 0)?;
-        assert_eq!(parsed.0, DataType::Array { elements: Vec::new() });
-        assert_eq!(parsed.1, 5);
         Ok(())
     }
 
