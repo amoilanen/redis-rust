@@ -22,5 +22,9 @@ name = "e2e_list_commands"
 path = "e2e/list_commands.rs"
 
 [[test]]
+name = "e2e_type_command"
+path = "e2e/type_command.rs"
+
+[[test]]
 name = "e2e_replication"
 path = "e2e/replication.rs"

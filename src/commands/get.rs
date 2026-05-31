@@ -55,11 +55,7 @@ impl RedisCommand for Get {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-
-    fn create_test_storage() -> Arc<Mutex<Storage>> {
-        Arc::new(Mutex::new(Storage::new(HashMap::new())))
-    }
+    use crate::commands::create_test_storage;
 
     fn insert_test_data(storage: &Arc<Mutex<Storage>>, key: &str, value: &str) {
         let mut data = storage.lock().unwrap();

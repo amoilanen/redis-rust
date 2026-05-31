@@ -16,6 +16,7 @@ pub mod info;
 pub mod replconf;
 pub mod psync;
 pub mod list;
+pub mod r#type;
 
 // Re-export all command types for convenience
 pub use echo::Echo;
@@ -27,6 +28,7 @@ pub use info::Info;
 pub use replconf::ReplConf;
 pub use psync::PSync;
 pub use list::{RPush, LPush, LRange, LLen, LPop, BLPop};
+pub use r#type::Type;
 
 /// Trait for implementing Redis commands.
 ///
@@ -60,6 +62,13 @@ pub fn parse_command_name(received_message: &DataType) -> Result<String, anyhow:
     let command_parts: Vec<&str> = received_message_parts.iter().map(|x| x.as_str()).collect();
     let command_name = command_parts.get(0).unwrap_or(&"").to_string();
     Ok(command_name)
+}
+
+/// Build a fresh, empty `Storage` wrapped in an `Arc<Mutex<...>>` for unit tests.
+#[cfg(test)]
+fn create_test_storage() -> Arc<Mutex<Storage>> {
+    use std::collections::HashMap;
+    Arc::new(Mutex::new(Storage::new(HashMap::new())))
 }
 
 #[cfg(test)]

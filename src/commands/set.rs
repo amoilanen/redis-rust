@@ -72,13 +72,9 @@ impl RedisCommand for Set {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use std::thread;
     use std::time::Duration;
-
-    fn create_test_storage() -> Arc<Mutex<Storage>> {
-        Arc::new(Mutex::new(Storage::new(HashMap::new())))
-    }
+    use crate::commands::create_test_storage;
 
     #[test]
     fn test_set_command_basic() -> Result<(), Box<dyn std::error::Error>> {

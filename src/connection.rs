@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::protocol::DataType;
 use crate::io;
-use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop};
+use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type};
 use crate::storage::Storage;
 use crate::server_state::ServerState;
 
@@ -110,6 +110,10 @@ pub fn handle_connection(
                         command = Some(Box::new(BLPop {
                             message: received_message.clone(),
                             notifier: Arc::clone(&server_state.blocking_notifier),
+                        }));
+                    } else if command_name == "TYPE" {
+                        command = Some(Box::new(Type {
+                            message: received_message.clone()
                         }));
                     } else if command_name == "PSYNC" {
                         command = Some(Box::new(PSync {
