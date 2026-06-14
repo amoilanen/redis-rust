@@ -16,6 +16,7 @@ pub mod info;
 pub mod replconf;
 pub mod psync;
 pub mod list;
+pub mod stream;
 pub mod r#type;
 
 // Re-export all command types for convenience
@@ -28,6 +29,7 @@ pub use info::Info;
 pub use replconf::ReplConf;
 pub use psync::PSync;
 pub use list::{RPush, LPush, LRange, LLen, LPop, BLPop};
+pub use stream::XAdd;
 pub use r#type::Type;
 
 /// Trait for implementing Redis commands.

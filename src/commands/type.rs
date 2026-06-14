@@ -31,19 +31,20 @@ impl RedisCommand for Type {
 
         debug!("TYPE {}", key);
 
-        let stored_value = storage
+        let mut storage = storage
             .lock()
-            .map_err(|e| anyhow::anyhow!("Failed to lock storage: {}", e))?
-            .get(key)?;
+            .map_err(|e| anyhow::anyhow!("Failed to lock storage: {}", e))?;
 
-        // Storage is untyped at the byte level: lists are stored as a
-        // RESP-serialized Array, everything else is a plain string.
-        let type_name = match stored_value {
-            None => "none",
-            Some(value) => match protocol::read_message_from_bytes(&value) {
+        // Lists are stored as a RESP Array; anything else is a string.
+        let type_name = if storage.contains_stream(key) {
+            "stream"
+        } else if let Some(value) = storage.get(key)? {
+            match protocol::read_message_from_bytes(&value) {
                 Ok(DataType::Array { .. }) => "list",
                 _ => "string",
-            },
+            }
+        } else {
+            "none"
         };
 
         Ok(vec![protocol::simple_string(type_name)])
@@ -120,6 +121,44 @@ mod tests {
 
         let result = type_cmd("mylist").execute(&storage)?;
         assert_eq!(result[0], protocol::simple_string("list"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_type_of_stream_value() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let xadd_msg = protocol::array(vec![
+            protocol::bulk_string("XADD"),
+            protocol::bulk_string("stream_key"),
+            protocol::bulk_string("0-1"),
+            protocol::bulk_string("foo"),
+            protocol::bulk_string("bar"),
+        ]);
+        crate::commands::stream::XAdd { message: xadd_msg }.execute(&storage)?;
+
+        let result = type_cmd("stream_key").execute(&storage)?;
+        assert_eq!(result[0], protocol::simple_string("stream"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_type_after_overwriting_stream_with_string() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let xadd_msg = protocol::array(vec![
+            protocol::bulk_string("XADD"),
+            protocol::bulk_string("k"),
+            protocol::bulk_string("0-1"),
+            protocol::bulk_string("foo"),
+            protocol::bulk_string("bar"),
+        ]);
+        crate::commands::stream::XAdd { message: xadd_msg }.execute(&storage)?;
+        let set_msg = protocol::array(vec![
+            protocol::bulk_string("SET"),
+            protocol::bulk_string("k"),
+            protocol::bulk_string("now_a_string"),
+        ]);
+        Set { message: set_msg }.execute(&storage)?;
+        assert_eq!(type_cmd("k").execute(&storage)?[0], protocol::simple_string("string"));
         Ok(())
     }
 

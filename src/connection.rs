@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::protocol::DataType;
 use crate::io;
-use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type};
+use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd};
 use crate::storage::Storage;
 use crate::server_state::ServerState;
 
@@ -124,6 +124,7 @@ fn build_command(
         "LPOP"     => Box::new(LPop { message }),
         "BLPOP"    => Box::new(BLPop { message, notifier: notifier() }),
         "TYPE"     => Box::new(Type { message }),
+        "XADD"     => Box::new(XAdd { message }),
         "PSYNC"    => Box::new(PSync { message, server_state: state() }),
         _ => return None,
     };

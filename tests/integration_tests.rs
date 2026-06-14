@@ -683,3 +683,39 @@ fn e2e_list_commands_public_api_smoke_test() -> Result<()> {
     );
     Ok(())
 }
+
+// ============= STREAM COMMANDS (XADD / TYPE) =============
+//
+// Per-command logic and edge cases (wrong-type collisions, syntax errors)
+// are covered by unit tests in src/commands/stream/*.rs and src/storage.rs.
+// Wire-format encoding is covered by e2e/stream_commands.rs. This smoke test
+// proves XADD and Type are publicly re-exported and compose against a shared
+// Storage: XADD creates a stream and Type then reports it as such.
+
+#[test]
+fn e2e_stream_commands_public_api_smoke_test() -> Result<()> {
+    let storage = create_test_storage();
+
+    let added = XAdd {
+        message: protocol::array(vec![
+            protocol::bulk_string("XADD"),
+            protocol::bulk_string("stream_key"),
+            protocol::bulk_string("0-1"),
+            protocol::bulk_string("temperature"),
+            protocol::bulk_string("36"),
+        ]),
+    }
+    .execute(&storage)?;
+    assert_eq!(added[0], protocol::bulk_string("0-1"));
+
+    let type_of_stream = Type {
+        message: protocol::array(vec![
+            protocol::bulk_string("TYPE"),
+            protocol::bulk_string("stream_key"),
+        ]),
+    }
+    .execute(&storage)?;
+    assert_eq!(type_of_stream[0], protocol::simple_string("stream"));
+
+    Ok(())
+}

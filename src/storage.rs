@@ -3,12 +3,23 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::Cursor;
 use crate::rdb;
+use crate::stream::Stream;
+
+/// The payload held at a key. Strings and lists are stored as opaque bytes
+/// (lists as a RESP-serialized Array); streams are stored as a [`Stream`].
+/// Keeping both in one enum lets a single `data` map own the whole key-space,
+/// so every key carries the same expiry metadata and is looked up uniformly.
+#[derive(Debug, PartialEq, Clone)]
+pub enum Value {
+    Bytes(Vec<u8>),
+    Stream(Stream),
+}
 
 #[derive(Debug, PartialEq)]
 pub struct StoredValue {
     expires_in_ms: Option<u64>,
     last_modified_timestamp: u128,
-    pub value: Vec<u8>,
+    pub value: Value,
 }
 
 impl StoredValue {
@@ -18,7 +29,18 @@ impl StoredValue {
             last_modified_timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)?
                 .as_millis(),
-            value,
+            value: Value::Bytes(value),
+        })
+    }
+
+    /// Wraps a [`Stream`] as a stored value with no expiry.
+    pub fn stream(stream: Stream) -> Result<StoredValue, anyhow::Error> {
+        Ok(StoredValue {
+            expires_in_ms: None,
+            last_modified_timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)?
+                .as_millis(),
+            value: Value::Stream(stream),
         })
     }
 
@@ -35,8 +57,18 @@ impl StoredValue {
         Ok(StoredValue {
             expires_in_ms,
             last_modified_timestamp: now_ms,
-            value,
+            value: Value::Bytes(value),
         })
+    }
+
+    /// Returns the raw payload if this value is a string; `None` for a stream.
+    /// String-only by design: callers like `GET` must treat a stream as absent
+    /// rather than receive its serialized bytes.
+    pub fn string_value_as_bytes(&self) -> Option<&[u8]> {
+        match &self.value {
+            Value::Bytes(bytes) => Some(bytes),
+            Value::Stream(_) => None,
+        }
     }
 
     /// Returns the absolute expiry timestamp in ms since Unix epoch.
@@ -68,6 +100,51 @@ impl Storage {
         Storage { data }
     }
 
+    /// Append a stream entry with an explicit ID, creating the stream if
+    /// needed. Errors with `WRONGTYPE` if `key` already holds a string or list.
+    pub fn xadd(
+        &mut self,
+        key: &str,
+        id: &str,
+        fields: Vec<(String, String)>,
+    ) -> Result<String, anyhow::Error> {
+        // Append to an existing live stream, or reject a live non-stream value.
+        if let Some(stored) = self.data.get_mut(key) {
+            if !stored.is_expired() {
+                return match &mut stored.value {
+                    Value::Stream(stream) => Ok(stream.add(id.to_owned(), fields)),
+                    Value::Bytes(_) => Err(crate::error::RedisError {
+                        message:
+                            "WRONGTYPE Operation against a key holding the wrong kind of value"
+                                .to_string(),
+                    }
+                    .into()),
+                };
+            }
+        }
+
+        // Key is absent or expired: create a fresh stream.
+        let mut stream = Stream::new();
+        let stored_id = stream.add(id.to_owned(), fields);
+        self.data.insert(key.to_owned(), StoredValue::stream(stream)?);
+        Ok(stored_id)
+    }
+
+    /// Returns the stream stored at `key`, if a live one exists there.
+    pub fn get_stream(&self, key: &str) -> Option<&Stream> {
+        match self.data.get(key) {
+            Some(stored) if !stored.is_expired() => match &stored.value {
+                Value::Stream(stream) => Some(stream),
+                Value::Bytes(_) => None,
+            },
+            _ => None,
+        }
+    }
+
+    pub fn contains_stream(&self, key: &str) -> bool {
+        self.get_stream(key).is_some()
+    }
+
     pub fn to_rdb(&self) -> Result<Vec<u8>, Error> {
         let mut buffer: Vec<u8> = Vec::new();
         let mut writer = Cursor::new(&mut buffer);
@@ -82,7 +159,9 @@ impl Storage {
     pub fn to_pairs(&self) -> HashMap<String, Vec<u8>> {
         let mut result = HashMap::new();
         for (key, value) in self.data.iter() {
-            result.insert(key.clone(), value.value.clone());
+            if let Value::Bytes(bytes) = &value.value {
+                result.insert(key.clone(), bytes.clone());
+            }
         }
         result
     }
@@ -93,6 +172,7 @@ impl Storage {
         value: Vec<u8>,
         expires_in_ms: Option<u64>,
     ) -> Result<Option<StoredValue>, anyhow::Error> {
+        // Inserting overwrites whatever was at the key, including a stream.
         Ok(self.data.insert(
             key.to_owned(),
             StoredValue::from(value, expires_in_ms)?,
@@ -100,23 +180,12 @@ impl Storage {
     }
 
     pub fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>, anyhow::Error> {
-        let value = match self.data.get(&key.to_owned()) {
-            Some(stored_value) => {
-                let current_time_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)?
-                    .as_millis();
-                let has_value_expired = if let Some(expires_in_ms) = stored_value.expires_in_ms {
-                    current_time_ms >= stored_value.last_modified_timestamp + expires_in_ms as u128
-                } else {
-                    false
-                };
-                if has_value_expired {
-                    None
-                } else {
-                    Some(stored_value.value.clone())
-                }
+        let value = match self.data.get(key) {
+            Some(stored_value) if !stored_value.is_expired() => {
+                // GET only yields byte values; streams report as absent here.
+                stored_value.string_value_as_bytes().map(|bytes| bytes.to_vec())
             }
-            None => None,
+            _ => None,
         };
         Ok(value)
     }
@@ -172,7 +241,7 @@ mod tests {
 
         let old = storage.set("key", b"new".to_vec(), None)?;
         assert!(old.is_some());
-        assert_eq!(old.unwrap().value, b"old".to_vec());
+        assert_eq!(old.unwrap().string_value_as_bytes().unwrap(), b"old");
         Ok(())
     }
 
@@ -309,6 +378,36 @@ mod tests {
     fn test_is_expired_no_expiry() -> Result<(), anyhow::Error> {
         let sv = StoredValue::from(b"val".to_vec(), None)?;
         assert!(!sv.is_expired());
+        Ok(())
+    }
+
+    #[test]
+    fn test_xadd_creates_stream() -> Result<(), anyhow::Error> {
+        let mut storage = Storage::new(HashMap::new());
+        let id = storage.xadd("s", "0-1", vec![("f".to_string(), "v".to_string())])?;
+        assert_eq!(id, "0-1");
+        assert!(storage.contains_stream("s"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_xadd_on_existing_string_is_wrong_type() -> Result<(), anyhow::Error> {
+        let mut storage = Storage::new(HashMap::new());
+        storage.set("k", b"value".to_vec(), None)?;
+        assert!(storage.xadd("k", "0-1", vec![]).is_err());
+        assert!(!storage.contains_stream("k"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_set_clears_existing_stream() -> Result<(), anyhow::Error> {
+        let mut storage = Storage::new(HashMap::new());
+        storage.xadd("k", "0-1", vec![])?;
+        assert!(storage.contains_stream("k"));
+
+        storage.set("k", b"value".to_vec(), None)?;
+        assert!(!storage.contains_stream("k"));
+        assert_eq!(storage.get("k")?, Some(b"value".to_vec()));
         Ok(())
     }
 }

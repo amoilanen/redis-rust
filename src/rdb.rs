@@ -15,7 +15,8 @@ use anyhow::{anyhow, ensure, Context, Result};
 use log::*;
 use std::collections::HashMap;
 
-use crate::storage::{Storage, StoredValue};
+use crate::storage::{Storage, StoredValue, Value};
+use crate::stream::{Stream, StreamEntry};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -48,6 +49,9 @@ const RDB_TYPE_ZSET_ZIPLIST: u8 = 12;
 #[allow(dead_code)]
 const RDB_TYPE_HASH_ZIPLIST: u8 = 13;
 const RDB_TYPE_LIST_QUICKLIST: u8 = 14;
+// Stream. Encoded with a simplified self-describing layout (see write_stream),
+// not the listpack format upstream Redis uses for this type code.
+const RDB_TYPE_STREAM: u8 = 21;
 
 // Special encoding subtypes (within the 0b11 length-encoding prefix)
 const RDB_ENC_INT8: u8 = 0;
@@ -272,11 +276,49 @@ pub fn write_string(buf: &mut Vec<u8>, data: &[u8]) {
 }
 
 // ---------------------------------------------------------------------------
+// Stream encoding
+// ---------------------------------------------------------------------------
+
+/// Layout: `<entry-count>` then per entry `<id> <field-count>` followed by
+/// `<name> <value>` per field, using RDB length and string encodings.
+fn write_stream(buf: &mut Vec<u8>, stream: &Stream) {
+    buf.extend(encode_length(stream.entries.len()));
+    for entry in &stream.entries {
+        write_string(buf, entry.id.as_bytes());
+        buf.extend(encode_length(entry.fields.len()));
+        for (name, value) in &entry.fields {
+            write_string(buf, name.as_bytes());
+            write_string(buf, value.as_bytes());
+        }
+    }
+}
+
+fn read_stream<R: Read>(reader: &mut R) -> Result<Stream> {
+    let entry_count = decode_length(reader)?;
+    let mut entries = Vec::with_capacity(entry_count);
+    for _ in 0..entry_count {
+        let id = String::from_utf8(read_string(reader)?)
+            .context("Stream entry ID is not valid UTF-8")?;
+        let field_count = decode_length(reader)?;
+        let mut fields = Vec::with_capacity(field_count);
+        for _ in 0..field_count {
+            let name = String::from_utf8(read_string(reader)?)
+                .context("Stream field name is not valid UTF-8")?;
+            let value = String::from_utf8(read_string(reader)?)
+                .context("Stream field value is not valid UTF-8")?;
+            fields.push((name, value));
+        }
+        entries.push(StreamEntry { id, fields });
+    }
+    Ok(Stream { entries })
+}
+
+// ---------------------------------------------------------------------------
 // Value skipping (for unsupported types)
 // ---------------------------------------------------------------------------
 
-/// Skip over a value of the given type without storing it.
-/// This allows the parser to continue past unsupported Redis data types.
+/// Consume a value's bytes without storing it, keeping the cursor aligned on
+/// the next entry. Used to step over types this server does not model.
 fn skip_value<R: Read>(reader: &mut R, value_type: u8) -> Result<()> {
     match value_type {
         RDB_TYPE_STRING => {
@@ -323,6 +365,9 @@ fn skip_value<R: Read>(reader: &mut R, value_type: u8) -> Result<()> {
                 let _ = read_string(reader)?;
             }
         }
+        RDB_TYPE_STREAM => {
+            let _ = read_stream(reader)?;
+        }
         _ => return Err(anyhow!("Unknown RDB value type: {}", value_type)),
     }
     Ok(())
@@ -341,20 +386,27 @@ fn load_rdb_key_value<R: Read>(
     expiry_ms: Option<u64>,
     data: &mut HashMap<String, StoredValue>,
 ) -> Result<()> {
-    if value_type == RDB_TYPE_STRING {
-        let value = read_string(cursor)?;
-        let stored = StoredValue::with_absolute_expiry(value, expiry_ms)?;
-        if !stored.is_expired() {
-            data.insert(key_str, stored);
-        } else {
-            debug!("Skipping expired key '{}' during RDB load", key_str);
+    match value_type {
+        RDB_TYPE_STRING => {
+            let value = read_string(cursor)?;
+            let stored = StoredValue::with_absolute_expiry(value, expiry_ms)?;
+            if !stored.is_expired() {
+                data.insert(key_str, stored);
+            } else {
+                debug!("Skipping expired key '{}' during RDB load", key_str);
+            }
         }
-    } else {
-        warn!(
-            "Skipping unsupported value type {} for key '{}'",
-            value_type, key_str
-        );
-        skip_value(cursor, value_type)?;
+        RDB_TYPE_STREAM => {
+            let stream = read_stream(cursor)?;
+            data.insert(key_str, StoredValue::stream(stream)?);
+        }
+        _ => {
+            warn!(
+                "Skipping unsupported value type {} for key '{}'",
+                value_type, key_str
+            );
+            skip_value(cursor, value_type)?;
+        }
     }
     Ok(())
 }
@@ -530,14 +582,18 @@ where
             buf.extend_from_slice(&expires_at.to_le_bytes());
         }
 
-        // Value type: String
-        buf.push(RDB_TYPE_STRING);
-
-        // Key
-        write_string(&mut buf, key.as_bytes());
-
-        // Value
-        write_string(&mut buf, &stored_value.value);
+        match &stored_value.value {
+            Value::Bytes(bytes) => {
+                buf.push(RDB_TYPE_STRING);
+                write_string(&mut buf, key.as_bytes());
+                write_string(&mut buf, bytes);
+            }
+            Value::Stream(stream) => {
+                buf.push(RDB_TYPE_STREAM);
+                write_string(&mut buf, key.as_bytes());
+                write_stream(&mut buf, stream);
+            }
+        }
     }
 
     // EOF marker
@@ -759,8 +815,8 @@ mod tests {
         to_rdb(&storage, &mut Cursor::new(&mut buffer))?;
         let loaded = from_rdb(Cursor::new(&buffer))?;
 
-        assert_eq!(loaded.data.get("permanent").unwrap().value, b"forever");
-        assert_eq!(loaded.data.get("session").unwrap().value, b"data");
+        assert_eq!(loaded.data.get("permanent").unwrap().string_value_as_bytes().unwrap(), b"forever");
+        assert_eq!(loaded.data.get("session").unwrap().string_value_as_bytes().unwrap(), b"data");
         assert!(loaded.data.get("session").unwrap().expires_at_ms().is_some());
         Ok(())
     }
@@ -876,7 +932,7 @@ mod tests {
 
         let rdb = build_rdb(&body);
         let loaded = from_rdb(Cursor::new(&rdb))?;
-        assert_eq!(loaded.data.get("mykey").unwrap().value, b"myval");
+        assert_eq!(loaded.data.get("mykey").unwrap().string_value_as_bytes().unwrap(), b"myval");
         Ok(())
     }
 
@@ -899,7 +955,7 @@ mod tests {
 
         let rdb = build_rdb(&body);
         let loaded = from_rdb(Cursor::new(&rdb))?;
-        assert_eq!(loaded.data.get("session").unwrap().value, b"active");
+        assert_eq!(loaded.data.get("session").unwrap().string_value_as_bytes().unwrap(), b"active");
         assert!(loaded.data.get("session").unwrap().expires_at_ms().is_some());
         Ok(())
     }
@@ -923,7 +979,7 @@ mod tests {
 
         let rdb = build_rdb(&body);
         let loaded = from_rdb(Cursor::new(&rdb))?;
-        assert_eq!(loaded.data.get("persistent").unwrap().value, b"data");
+        assert_eq!(loaded.data.get("persistent").unwrap().string_value_as_bytes().unwrap(), b"data");
         Ok(())
     }
 
@@ -953,7 +1009,7 @@ mod tests {
         let loaded = from_rdb(Cursor::new(&rdb))?;
 
         assert!(loaded.data.get("expired_key").is_none());
-        assert_eq!(loaded.data.get("alive_key").unwrap().value, b"here");
+        assert_eq!(loaded.data.get("alive_key").unwrap().string_value_as_bytes().unwrap(), b"here");
         Ok(())
     }
 
@@ -987,9 +1043,9 @@ mod tests {
         let rdb = build_rdb(&body);
         let loaded = from_rdb(Cursor::new(&rdb))?;
 
-        assert_eq!(loaded.data.get("int8_key").unwrap().value, b"42");
-        assert_eq!(loaded.data.get("int16_key").unwrap().value, b"1000");
-        assert_eq!(loaded.data.get("int32_key").unwrap().value, b"1000000");
+        assert_eq!(loaded.data.get("int8_key").unwrap().string_value_as_bytes().unwrap(), b"42");
+        assert_eq!(loaded.data.get("int16_key").unwrap().string_value_as_bytes().unwrap(), b"1000");
+        assert_eq!(loaded.data.get("int32_key").unwrap().string_value_as_bytes().unwrap(), b"1000000");
         Ok(())
     }
 
@@ -1028,7 +1084,7 @@ mod tests {
 
         assert!(loaded.data.get("myhash").is_none());
         assert!(loaded.data.get("mylist").is_none());
-        assert_eq!(loaded.data.get("mystring").unwrap().value, b"hello");
+        assert_eq!(loaded.data.get("mystring").unwrap().string_value_as_bytes().unwrap(), b"hello");
         Ok(())
     }
 
@@ -1050,7 +1106,7 @@ mod tests {
 
         let rdb = build_rdb(&body);
         let loaded = from_rdb(Cursor::new(&rdb))?;
-        assert_eq!(loaded.data.get("real").unwrap().value, b"value");
+        assert_eq!(loaded.data.get("real").unwrap().string_value_as_bytes().unwrap(), b"value");
         Ok(())
     }
 
@@ -1076,8 +1132,8 @@ mod tests {
         let loaded = from_rdb(Cursor::new(&rdb))?;
 
         // Both are loaded into our single-db storage
-        assert_eq!(loaded.data.get("db0_key").unwrap().value, b"db0_val");
-        assert_eq!(loaded.data.get("db1_key").unwrap().value, b"db1_val");
+        assert_eq!(loaded.data.get("db0_key").unwrap().string_value_as_bytes().unwrap(), b"db0_val");
+        assert_eq!(loaded.data.get("db1_key").unwrap().string_value_as_bytes().unwrap(), b"db1_val");
         Ok(())
     }
 
@@ -1096,7 +1152,7 @@ mod tests {
         rdb.extend_from_slice(&checksum.to_le_bytes());
 
         let loaded = from_rdb(Cursor::new(&rdb))?;
-        assert_eq!(loaded.data.get("old_key").unwrap().value, b"old_val");
+        assert_eq!(loaded.data.get("old_key").unwrap().string_value_as_bytes().unwrap(), b"old_val");
         Ok(())
     }
 
@@ -1130,6 +1186,157 @@ mod tests {
         to_rdb(&storage, &mut Cursor::new(&mut buffer))?;
 
         assert!(buffer.contains(&RDB_OPCODE_EXPIRETIMEMS));
+        Ok(())
+    }
+
+    // -- Stream tests --
+
+    fn sample_stream() -> Stream {
+        let mut stream = Stream::new();
+        stream.add(
+            "1526919030474-0".to_string(),
+            vec![
+                ("temperature".to_string(), "36".to_string()),
+                ("humidity".to_string(), "95".to_string()),
+            ],
+        );
+        stream.add(
+            "1526919030474-1".to_string(),
+            vec![("sensor".to_string(), "2".to_string())],
+        );
+        stream
+    }
+
+    fn loaded_stream<'a>(storage: &'a Storage, key: &str) -> &'a Stream {
+        match &storage.data.get(key).expect("key present").value {
+            Value::Stream(stream) => stream,
+            other => panic!("expected stream at '{}', got {:?}", key, other),
+        }
+    }
+
+    #[test]
+    fn write_stream_read_stream_round_trip() -> Result<()> {
+        let stream = sample_stream();
+
+        let mut buf = Vec::new();
+        write_stream(&mut buf, &stream);
+        let parsed = read_stream(&mut Cursor::new(&buf))?;
+
+        assert_eq!(parsed, stream);
+        Ok(())
+    }
+
+    #[test]
+    fn round_trip_stream_key() -> Result<()> {
+        let mut data: HashMap<String, StoredValue> = HashMap::new();
+        data.insert("mystream".into(), StoredValue::stream(sample_stream())?);
+        let storage = Storage::new(data);
+
+        let mut buffer = Vec::new();
+        to_rdb(&storage, &mut Cursor::new(&mut buffer))?;
+        let loaded = from_rdb(Cursor::new(&buffer))?;
+
+        assert_eq!(loaded_stream(&loaded, "mystream"), &sample_stream());
+        Ok(())
+    }
+
+    #[test]
+    fn round_trip_empty_stream() -> Result<()> {
+        let mut data: HashMap<String, StoredValue> = HashMap::new();
+        data.insert("empty".into(), StoredValue::stream(Stream::new())?);
+        let storage = Storage::new(data);
+
+        let mut buffer = Vec::new();
+        to_rdb(&storage, &mut Cursor::new(&mut buffer))?;
+        let loaded = from_rdb(Cursor::new(&buffer))?;
+
+        assert_eq!(loaded_stream(&loaded, "empty"), &Stream::new());
+        Ok(())
+    }
+
+    #[test]
+    fn round_trip_stream_with_empty_fields() -> Result<()> {
+        let mut stream = Stream::new();
+        stream.add("5-5".to_string(), vec![]);
+
+        let mut data: HashMap<String, StoredValue> = HashMap::new();
+        data.insert("s".into(), StoredValue::stream(stream.clone())?);
+        let storage = Storage::new(data);
+
+        let mut buffer = Vec::new();
+        to_rdb(&storage, &mut Cursor::new(&mut buffer))?;
+        let loaded = from_rdb(Cursor::new(&buffer))?;
+
+        assert_eq!(loaded_stream(&loaded, "s"), &stream);
+        Ok(())
+    }
+
+    #[test]
+    fn round_trip_mixed_strings_and_streams() -> Result<()> {
+        let mut data: HashMap<String, StoredValue> = HashMap::new();
+        data.insert("str".into(), StoredValue::from(b"value".to_vec(), None)?);
+        data.insert("stream".into(), StoredValue::stream(sample_stream())?);
+        let storage = Storage::new(data);
+
+        let mut buffer = Vec::new();
+        to_rdb(&storage, &mut Cursor::new(&mut buffer))?;
+        let loaded = from_rdb(Cursor::new(&buffer))?;
+
+        assert_eq!(loaded.data.len(), 2);
+        assert_eq!(loaded.data.get("str").unwrap().string_value_as_bytes().unwrap(), b"value");
+        assert_eq!(loaded_stream(&loaded, "stream"), &sample_stream());
+        Ok(())
+    }
+
+    #[test]
+    fn write_emits_stream_type_byte() -> Result<()> {
+        let mut data: HashMap<String, StoredValue> = HashMap::new();
+        data.insert("mystream".into(), StoredValue::stream(sample_stream())?);
+        let storage = Storage::new(data);
+
+        let mut buffer = Vec::new();
+        to_rdb(&storage, &mut Cursor::new(&mut buffer))?;
+
+        assert!(buffer.contains(&RDB_TYPE_STREAM));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_handcrafted_stream() -> Result<()> {
+        let mut body = Vec::new();
+        body.push(RDB_OPCODE_SELECTDB);
+        body.extend(encode_length(0));
+
+        body.push(RDB_TYPE_STREAM);
+        write_string(&mut body, b"events");
+        body.extend(encode_length(1)); // entry count
+        write_string(&mut body, b"10-0"); // entry id
+        body.extend(encode_length(1)); // field count
+        write_string(&mut body, b"action");
+        write_string(&mut body, b"login");
+
+        let rdb = build_rdb(&body);
+        let loaded = from_rdb(Cursor::new(&rdb))?;
+
+        let mut expected = Stream::new();
+        expected.add(
+            "10-0".to_string(),
+            vec![("action".to_string(), "login".to_string())],
+        );
+        assert_eq!(loaded_stream(&loaded, "events"), &expected);
+        Ok(())
+    }
+
+    #[test]
+    fn skip_value_handles_stream() -> Result<()> {
+        // Skipping the stream must leave the cursor at the following key.
+        let mut body = Vec::new();
+        write_stream(&mut body, &sample_stream());
+        write_string(&mut body, b"sentinel");
+
+        let mut cursor = Cursor::new(&body);
+        skip_value(&mut cursor, RDB_TYPE_STREAM)?;
+        assert_eq!(read_string(&mut cursor)?, b"sentinel");
         Ok(())
     }
 }

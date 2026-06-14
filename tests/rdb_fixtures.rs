@@ -294,15 +294,15 @@ fn fixture_string_keys() -> Result<()> {
     let storage = from_rdb(Cursor::new(&data))?;
     assert_eq!(storage.data.len(), 3);
     assert_eq!(
-        storage.data.get("name").context("missing key: name")?.value,
+        storage.data.get("name").context("missing key: name")?.string_value_as_bytes().unwrap(),
         b"Redis"
     );
     assert_eq!(
-        storage.data.get("version").context("missing key: version")?.value,
+        storage.data.get("version").context("missing key: version")?.string_value_as_bytes().unwrap(),
         b"7.0.0"
     );
     assert_eq!(
-        storage.data.get("lang").context("missing key: lang")?.value,
+        storage.data.get("lang").context("missing key: lang")?.string_value_as_bytes().unwrap(),
         b"C"
     );
     Ok(())
@@ -321,7 +321,7 @@ fn fixture_with_expiry() -> Result<()> {
             .data
             .get("session:abc")
             .context("missing key: session:abc")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"user123"
     );
     assert_eq!(
@@ -329,7 +329,7 @@ fn fixture_with_expiry() -> Result<()> {
             .data
             .get("session:def")
             .context("missing key: session:def")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"user456"
     );
     assert_eq!(
@@ -337,7 +337,7 @@ fn fixture_with_expiry() -> Result<()> {
             .data
             .get("permanent")
             .context("missing key: permanent")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"stays"
     );
 
@@ -382,7 +382,7 @@ fn fixture_integer_encoded() -> Result<()> {
             .data
             .get("small_num")
             .context("missing key: small_num")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"42"
     );
     assert_eq!(
@@ -390,7 +390,7 @@ fn fixture_integer_encoded() -> Result<()> {
             .data
             .get("neg_num")
             .context("missing key: neg_num")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"-5"
     );
     assert_eq!(
@@ -398,7 +398,7 @@ fn fixture_integer_encoded() -> Result<()> {
             .data
             .get("medium_num")
             .context("missing key: medium_num")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"10000"
     );
     assert_eq!(
@@ -406,7 +406,7 @@ fn fixture_integer_encoded() -> Result<()> {
             .data
             .get("large_num")
             .context("missing key: large_num")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"1000000"
     );
     Ok(())
@@ -425,7 +425,7 @@ fn fixture_aux_and_resize() -> Result<()> {
             .data
             .get("greeting")
             .context("missing key: greeting")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"hello"
     );
     Ok(())
@@ -445,7 +445,7 @@ fn fixture_multiple_databases() -> Result<()> {
             .data
             .get("db0:key1")
             .context("missing key: db0:key1")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"val1"
     );
     assert_eq!(
@@ -453,7 +453,7 @@ fn fixture_multiple_databases() -> Result<()> {
             .data
             .get("db0:key2")
             .context("missing key: db0:key2")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"val2"
     );
     assert_eq!(
@@ -461,7 +461,7 @@ fn fixture_multiple_databases() -> Result<()> {
             .data
             .get("db1:key1")
             .context("missing key: db1:key1")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"db1val"
     );
     Ok(())
@@ -481,7 +481,7 @@ fn fixture_mixed_types() -> Result<()> {
             .data
             .get("string_key")
             .context("missing key: string_key")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"string_val"
     );
     assert_eq!(
@@ -489,7 +489,7 @@ fn fixture_mixed_types() -> Result<()> {
             .data
             .get("another_string")
             .context("missing key: another_string")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"another_val"
     );
     assert!(storage.data.get("hash_key").is_none());
@@ -512,7 +512,7 @@ fn fixture_with_expired_keys() -> Result<()> {
             .data
             .get("valid")
             .context("missing key: valid")?
-            .value,
+            .string_value_as_bytes().unwrap(),
         b"fresh_data"
     );
     Ok(())
