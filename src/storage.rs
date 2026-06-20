@@ -112,7 +112,7 @@ impl Storage {
         if let Some(stored) = self.data.get_mut(key) {
             if !stored.is_expired() {
                 return match &mut stored.value {
-                    Value::Stream(stream) => Ok(stream.add(id.to_owned(), fields)),
+                    Value::Stream(stream) => Ok(stream.add(id, fields)?),
                     Value::Bytes(_) => Err(crate::error::RedisError {
                         message:
                             "WRONGTYPE Operation against a key holding the wrong kind of value"
@@ -123,9 +123,10 @@ impl Storage {
             }
         }
 
-        // Key is absent or expired: create a fresh stream.
+        // Key is absent or expired: build the stream first so a rejected ID
+        // leaves no empty stream behind, then store it.
         let mut stream = Stream::new();
-        let stored_id = stream.add(id.to_owned(), fields);
+        let stored_id = stream.add(id, fields)?;
         self.data.insert(key.to_owned(), StoredValue::stream(stream)?);
         Ok(stored_id)
     }

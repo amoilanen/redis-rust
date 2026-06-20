@@ -9,7 +9,8 @@ use std::io::Write;
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 
-use crate::protocol::DataType;
+use crate::protocol::{self, DataType};
+use crate::error::RedisError;
 use crate::io;
 use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd};
 use crate::storage::Storage;
@@ -87,7 +88,22 @@ fn handle_command(
         register_replica(stream, server_state)?;
     }
 
-    let reply = command.execute(storage)?;
+    let reply = match command.execute(storage) {
+        Ok(reply) => reply,
+        // A RedisError is a client-facing error reply, not a connection failure:
+        // surface it as a RESP simple error and keep serving the client. The
+        // failed write is never propagated to replicas.
+        Err(error) => match error.downcast::<RedisError>() {
+            Ok(redis_error) => {
+                if should_reply || command.should_always_reply() {
+                    send_reply(stream, vec![protocol::simple_error(&redis_error.message)])?;
+                }
+                return Ok(());
+            }
+            Err(other) => return Err(other),
+        },
+    };
+
     if should_reply || command.should_always_reply() {
         send_reply(stream, reply)?;
     }

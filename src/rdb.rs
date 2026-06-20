@@ -1191,20 +1191,20 @@ mod tests {
 
     // -- Stream tests --
 
-    fn sample_stream() -> Stream {
+    fn sample_stream() -> Result<Stream> {
         let mut stream = Stream::new();
         stream.add(
-            "1526919030474-0".to_string(),
+            "1526919030474-0",
             vec![
                 ("temperature".to_string(), "36".to_string()),
                 ("humidity".to_string(), "95".to_string()),
             ],
-        );
+        )?;
         stream.add(
-            "1526919030474-1".to_string(),
+            "1526919030474-1",
             vec![("sensor".to_string(), "2".to_string())],
-        );
-        stream
+        )?;
+        Ok(stream)
     }
 
     fn loaded_stream<'a>(storage: &'a Storage, key: &str) -> &'a Stream {
@@ -1216,7 +1216,7 @@ mod tests {
 
     #[test]
     fn write_stream_read_stream_round_trip() -> Result<()> {
-        let stream = sample_stream();
+        let stream = sample_stream()?;
 
         let mut buf = Vec::new();
         write_stream(&mut buf, &stream);
@@ -1229,14 +1229,14 @@ mod tests {
     #[test]
     fn round_trip_stream_key() -> Result<()> {
         let mut data: HashMap<String, StoredValue> = HashMap::new();
-        data.insert("mystream".into(), StoredValue::stream(sample_stream())?);
+        data.insert("mystream".into(), StoredValue::stream(sample_stream()?)?);
         let storage = Storage::new(data);
 
         let mut buffer = Vec::new();
         to_rdb(&storage, &mut Cursor::new(&mut buffer))?;
         let loaded = from_rdb(Cursor::new(&buffer))?;
 
-        assert_eq!(loaded_stream(&loaded, "mystream"), &sample_stream());
+        assert_eq!(loaded_stream(&loaded, "mystream"), &sample_stream()?);
         Ok(())
     }
 
@@ -1257,7 +1257,7 @@ mod tests {
     #[test]
     fn round_trip_stream_with_empty_fields() -> Result<()> {
         let mut stream = Stream::new();
-        stream.add("5-5".to_string(), vec![]);
+        stream.add("5-5", vec![])?;
 
         let mut data: HashMap<String, StoredValue> = HashMap::new();
         data.insert("s".into(), StoredValue::stream(stream.clone())?);
@@ -1275,7 +1275,7 @@ mod tests {
     fn round_trip_mixed_strings_and_streams() -> Result<()> {
         let mut data: HashMap<String, StoredValue> = HashMap::new();
         data.insert("str".into(), StoredValue::from(b"value".to_vec(), None)?);
-        data.insert("stream".into(), StoredValue::stream(sample_stream())?);
+        data.insert("stream".into(), StoredValue::stream(sample_stream()?)?);
         let storage = Storage::new(data);
 
         let mut buffer = Vec::new();
@@ -1284,14 +1284,14 @@ mod tests {
 
         assert_eq!(loaded.data.len(), 2);
         assert_eq!(loaded.data.get("str").unwrap().string_value_as_bytes().unwrap(), b"value");
-        assert_eq!(loaded_stream(&loaded, "stream"), &sample_stream());
+        assert_eq!(loaded_stream(&loaded, "stream"), &sample_stream()?);
         Ok(())
     }
 
     #[test]
     fn write_emits_stream_type_byte() -> Result<()> {
         let mut data: HashMap<String, StoredValue> = HashMap::new();
-        data.insert("mystream".into(), StoredValue::stream(sample_stream())?);
+        data.insert("mystream".into(), StoredValue::stream(sample_stream()?)?);
         let storage = Storage::new(data);
 
         let mut buffer = Vec::new();
@@ -1320,9 +1320,9 @@ mod tests {
 
         let mut expected = Stream::new();
         expected.add(
-            "10-0".to_string(),
+            "10-0",
             vec![("action".to_string(), "login".to_string())],
-        );
+        )?;
         assert_eq!(loaded_stream(&loaded, "events"), &expected);
         Ok(())
     }
@@ -1331,7 +1331,7 @@ mod tests {
     fn skip_value_handles_stream() -> Result<()> {
         // Skipping the stream must leave the cursor at the following key.
         let mut body = Vec::new();
-        write_stream(&mut body, &sample_stream());
+        write_stream(&mut body, &sample_stream()?);
         write_string(&mut body, b"sentinel");
 
         let mut cursor = Cursor::new(&body);

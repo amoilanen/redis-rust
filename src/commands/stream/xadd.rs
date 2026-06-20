@@ -148,6 +148,41 @@ mod tests {
     }
 
     #[test]
+    fn test_xadd_rejects_id_not_greater_than_top() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        xadd_cmd(&["XADD", "stream_key", "1-1", "foo", "bar"]).execute(&storage)?;
+
+        let err = xadd_cmd(&["XADD", "stream_key", "1-1", "baz", "foo"])
+            .execute(&storage)
+            .unwrap_err()
+            .downcast::<RedisError>()?;
+        assert_eq!(
+            err.message,
+            "ERR The ID specified in XADD is equal or smaller than the target stream top item"
+        );
+
+        // The rejected entry was not appended.
+        let guard = storage.lock().unwrap();
+        assert_eq!(guard.get_stream("stream_key").unwrap().entries.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_xadd_rejects_zero_id() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+
+        let err = xadd_cmd(&["XADD", "stream_key", "0-0", "foo", "bar"])
+            .execute(&storage)
+            .unwrap_err()
+            .downcast::<RedisError>()?;
+        assert_eq!(err.message, "ERR The ID specified in XADD must be greater than 0-0");
+
+        // No stream should have been created by the rejected command.
+        assert!(!storage.lock().unwrap().contains_stream("stream_key"));
+        Ok(())
+    }
+
+    #[test]
     fn test_xadd_invalid_syntax() {
         let storage = create_test_storage();
 

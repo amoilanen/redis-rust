@@ -44,6 +44,29 @@ fn test_xadd_appends_to_existing_stream() -> Result<()> {
 }
 
 #[test]
+fn test_xadd_rejects_invalid_id() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["XADD", "stream_key", "1-1", "foo", "bar"])?, "1-1");
+
+    // An ID that is not strictly greater than the top item is rejected.
+    let err = client
+        .send_command(&["XADD", "stream_key", "1-1", "baz", "foo"])
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "ERR The ID specified in XADD is equal or smaller than the target stream top item"
+    );
+
+    // The connection stays usable: a valid ID still succeeds afterwards.
+    assert_eq!(client.send_command(&["XADD", "stream_key", "1-2", "baz", "foo"])?, "1-2");
+
+    Ok(())
+}
+
+#[test]
 fn test_type_of_stream_key() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
