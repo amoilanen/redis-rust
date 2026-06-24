@@ -44,6 +44,17 @@ fn test_xadd_appends_to_existing_stream() -> Result<()> {
 }
 
 #[test]
+fn test_xadd_auto_generated_sequence_id() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["XADD", "k", "1526919030473-1", "a", "1"])?, "1526919030473-1");
+    assert_eq!(client.send_command(&["XADD", "k", "1526919030473-*", "b", "2"])?, "1526919030473-2");
+    Ok(())
+}
+
+#[test]
 fn test_xadd_rejects_invalid_id() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);

@@ -3,7 +3,7 @@ use std::fmt;
 use crate::error::RedisError;
 
 /// A stream entry ID: `<milliseconds>-<sequence>`
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct StreamId {
     pub milliseconds: u64,
     pub sequence: u64,
@@ -11,6 +11,13 @@ pub struct StreamId {
 
 impl StreamId {
     pub const ZERO: StreamId = StreamId { milliseconds: 0, sequence: 0 };
+
+    pub fn new(milliseconds: u64, sequence: u64) -> StreamId {
+        StreamId {
+            milliseconds,
+            sequence
+        }
+    }
 
     pub fn parse(id: &str) -> Result<StreamId, RedisError> {
         let invalid = || RedisError {
@@ -50,19 +57,45 @@ impl Stream {
     }
 
     pub fn add(&mut self, id: &str, fields: Vec<(String, String)>) -> Result<String, RedisError> {
-        let new_id = StreamId::parse(id)?;
-        self.validate_id(new_id)?;
+        let new_id = if id == "*" {
+            //TODO: Implement generating the whole of the id
+            StreamId::default()
+        } else if id.ends_with("-*") {
+            let invalid = || RedisError {
+                message: "ERR Invalid stream ID specified as stream command argument".to_string(),
+            };
+            let time_part: u64 = id[..(id.len() - 2)].parse().map_err(|_| invalid())?;
+            self.new_id_with_generated_sequence_number(time_part)
+        } else {
+            let parsed_id = StreamId::parse(id)?;
+            self.validate_id(parsed_id)?;
+            parsed_id
+        };
+
 
         let stored_id = new_id.to_string();
         self.entries.push(StreamEntry { id: stored_id.clone(), fields });
         Ok(stored_id)
     }
 
+    fn new_id_with_generated_sequence_number(&self, time_part: u64) -> StreamId {
+        match self.last_id_filtered_by_time_part(Some(time_part)) {
+            Some(last) => StreamId::new(time_part, last.sequence + 1),
+            None if time_part == 0 => StreamId::new(time_part, 1),
+            None => StreamId::new(time_part, 0)
+        }
+    }
+
     fn last_id(&self) -> Option<StreamId> {
+        self.last_id_filtered_by_time_part(None)
+    }
+
+    fn last_id_filtered_by_time_part(&self, time_part: Option<u64>) -> Option<StreamId> {
         self.entries
+            .iter()
+            .flat_map(|entry| StreamId::parse(&entry.id).ok())
+            .filter(|id| time_part.is_none() || time_part == Some(id.milliseconds))
             .last()
-            .map(|entry| StreamId::parse(&entry.id).ok())
-            .flatten()
     }
 
     fn validate_id(&self, new_id: StreamId) -> Result<(), RedisError> {
@@ -110,6 +143,71 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn test_stream_add_stream_is_empty_time_part_is_not_0() -> Result<()> {
+        let mut stream = Stream::new();
+        let returned = stream.add("1526919030473-*", vec![("foo".to_string(), "bar".to_string())])?;
+
+        assert_eq!(returned, "1526919030473-0");
+        assert_eq!(stream.entries.len(), 1);
+        assert_eq!(stream.entries[0].id, "1526919030473-0");
+        assert_eq!(
+            stream.entries[0].fields,
+            vec![("foo".to_string(), "bar".to_string())],
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_add_stream_is_empty_time_part_is_0() -> Result<()> {
+        let mut stream = Stream::new();
+        let returned = stream.add("0-*", vec![("foo".to_string(), "bar".to_string())])?;
+
+        assert_eq!(returned, "0-1");
+        assert_eq!(stream.entries.len(), 1);
+        assert_eq!(stream.entries[0].id, "0-1");
+        assert_eq!(
+            stream.entries[0].fields,
+            vec![("foo".to_string(), "bar".to_string())],
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_add_non_empty_stream_has_same_time_part() -> Result<()> {
+        let mut stream = Stream::new();
+        stream.add("1526919030473-2", Vec::new())?;
+
+        let returned = stream.add("1526919030473-*", vec![("foo".to_string(), "bar".to_string())])?;
+
+        assert_eq!(returned, "1526919030473-3");
+        assert_eq!(stream.entries.len(), 2);
+        assert_eq!(stream.entries[1].id, "1526919030473-3");
+        assert_eq!(
+            stream.entries[1].fields,
+            vec![("foo".to_string(), "bar".to_string())],
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_add_non_empty_stream_has_different_time_part() -> Result<()> {
+        let mut stream = Stream::new();
+        stream.add("1526919030473-2", Vec::new())?;
+        let returned = stream.add("1526919035000-*", vec![("foo".to_string(), "bar".to_string())])?;
+
+        assert_eq!(returned, "1526919035000-0");
+        assert_eq!(stream.entries.len(), 2);
+        assert_eq!(stream.entries[1].id, "1526919035000-0");
+        assert_eq!(
+            stream.entries[1].fields,
+            vec![("foo".to_string(), "bar".to_string())],
+        );
+        Ok(())
+    }
+
+    //TODO: * sequence number: stream contains entries with the time part
 
     #[test]
     fn test_stream_add_preserves_order() -> Result<()> {
