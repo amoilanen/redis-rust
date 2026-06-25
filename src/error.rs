@@ -5,6 +5,14 @@ pub struct RedisError {
     pub message: String,
 }
 
+impl RedisError {
+    pub(crate) fn new(message: &str) -> RedisError {
+        RedisError {
+            message: message.to_owned()
+        }
+    }
+}
+
 impl std::error::Error for RedisError {}
 
 impl fmt::Display for RedisError {

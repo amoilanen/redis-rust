@@ -1,18 +1,20 @@
-use std::fmt;
+use std::{fmt, time::UNIX_EPOCH};
+use anyhow::Result;
 
 use crate::error::RedisError;
+use crate::clock::{Clock, SystemClock};
 
 /// A stream entry ID: `<milliseconds>-<sequence>`
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct StreamId {
-    pub milliseconds: u64,
+    pub milliseconds: u128,
     pub sequence: u64,
 }
 
 impl StreamId {
     pub const ZERO: StreamId = StreamId { milliseconds: 0, sequence: 0 };
 
-    pub fn new(milliseconds: u64, sequence: u64) -> StreamId {
+    pub fn new(milliseconds: u128, sequence: u64) -> StreamId {
         StreamId {
             milliseconds,
             sequence
@@ -57,14 +59,17 @@ impl Stream {
     }
 
     pub fn add(&mut self, id: &str, fields: Vec<(String, String)>) -> Result<String, RedisError> {
+        self.add_with_clock(id, fields, &SystemClock {})
+    }
+
+    pub fn add_with_clock<C: Clock>(&mut self, id: &str, fields: Vec<(String, String)>, c: &C) -> Result<String, RedisError> {
         let new_id = if id == "*" {
-            //TODO: Implement generating the whole of the id
-            StreamId::default()
+            self.new_id_fully_generated(c)?
         } else if id.ends_with("-*") {
             let invalid = || RedisError {
                 message: "ERR Invalid stream ID specified as stream command argument".to_string(),
             };
-            let time_part: u64 = id[..(id.len() - 2)].parse().map_err(|_| invalid())?;
+            let time_part: u128 = id[..(id.len() - 2)].parse().map_err(|_| invalid())?;
             self.new_id_with_generated_sequence_number(time_part)
         } else {
             let parsed_id = StreamId::parse(id)?;
@@ -78,7 +83,12 @@ impl Stream {
         Ok(stored_id)
     }
 
-    fn new_id_with_generated_sequence_number(&self, time_part: u64) -> StreamId {
+    fn new_id_fully_generated<C: Clock>(&self, c: &C) -> Result<StreamId, RedisError> {
+        let current_timestamp = c.now().duration_since(UNIX_EPOCH).map_err(|e| RedisError::new(&format!("Error getting current time {}", e)) )?;
+        Ok(StreamId::new(current_timestamp.as_millis(), 0))
+    }
+
+    fn new_id_with_generated_sequence_number(&self, time_part: u128) -> StreamId {
         match self.last_id_filtered_by_time_part(Some(time_part)) {
             Some(last) => StreamId::new(time_part, last.sequence + 1),
             None if time_part == 0 => StreamId::new(time_part, 1),
@@ -90,7 +100,7 @@ impl Stream {
         self.last_id_filtered_by_time_part(None)
     }
 
-    fn last_id_filtered_by_time_part(&self, time_part: Option<u64>) -> Option<StreamId> {
+    fn last_id_filtered_by_time_part(&self, time_part: Option<u128>) -> Option<StreamId> {
         self.entries
             .iter()
             .flat_map(|entry| StreamId::parse(&entry.id).ok())
@@ -122,6 +132,14 @@ impl Stream {
 mod tests {
     use super::*;
     use anyhow::Result;
+    use std::time::{ Duration, SystemTime };
+
+    struct FixedClock(SystemTime);
+    impl Clock for FixedClock {
+        fn now(&self) -> SystemTime {
+            self.0
+        }
+    }
 
     #[test]
     fn test_stream_new_is_empty() {
@@ -207,7 +225,23 @@ mod tests {
         Ok(())
     }
 
-    //TODO: * sequence number: stream contains entries with the time part
+    #[test]
+    fn test_stream_add_with_fully_generated_id_non_empty_stream() -> Result<()> {
+        let mut stream = Stream::new();
+        let timestamp = UNIX_EPOCH + Duration::from_millis(123456789);
+        let clock = FixedClock(timestamp);
+        stream.add("0-1", Vec::new())?;
+        let returned = stream.add_with_clock("*", vec![("foo".to_string(), "bar".to_string())], &clock)?;
+
+        assert_eq!(returned, "123456789-0");
+        assert_eq!(stream.entries.len(), 2);
+        assert_eq!(stream.entries[1].id, "123456789-0");
+        assert_eq!(
+            stream.entries[1].fields,
+            vec![("foo".to_string(), "bar".to_string())],
+        );
+        Ok(())
+    }
 
     #[test]
     fn test_stream_add_preserves_order() -> Result<()> {

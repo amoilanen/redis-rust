@@ -10,3 +10,4 @@ pub mod rdb;
 pub mod server_state;
 pub mod storage;
 pub mod stream;
+pub mod clock;
