@@ -32,6 +32,27 @@ impl StreamId {
             sequence: seq.parse().map_err(|_| invalid())?,
         })
     }
+
+    /// Parse a stream ID used as a range boundary (e.g. for `XRANGE`), where the
+    /// sequence number is optional. When the `-<sequence>` part is omitted, the
+    /// sequence defaults to `default_sequence` (0 for a range start, the maximum
+    /// sequence for a range end).
+    pub fn parse_range(id: &str, default_sequence: u64) -> Result<StreamId, RedisError> {
+        let invalid = || RedisError {
+            message: "ERR Invalid stream ID specified as stream command argument".to_string(),
+        };
+
+        match id.split_once('-') {
+            Some((ms, seq)) => Ok(StreamId {
+                milliseconds: ms.parse().map_err(|_| invalid())?,
+                sequence: seq.parse().map_err(|_| invalid())?,
+            }),
+            None => Ok(StreamId {
+                milliseconds: id.parse().map_err(|_| invalid())?,
+                sequence: default_sequence,
+            }),
+        }
+    }
 }
 
 impl fmt::Display for StreamId {
@@ -43,7 +64,7 @@ impl fmt::Display for StreamId {
 /// A single entry in a stream: a unique ID plus its field-value pairs.
 #[derive(Debug, PartialEq, Clone)]
 pub struct StreamEntry {
-    pub id: String,
+    pub id: StreamId,
     pub fields: Vec<(String, String)>,
 }
 
@@ -78,9 +99,18 @@ impl Stream {
         };
 
 
-        let stored_id = new_id.to_string();
-        self.entries.push(StreamEntry { id: stored_id.clone(), fields });
-        Ok(stored_id)
+        self.entries.push(StreamEntry { id: new_id, fields });
+        Ok(new_id.to_string())
+    }
+
+    /// Returns the entries whose IDs fall within `[start, end]` inclusive,
+    /// preserving insertion order.
+    pub fn range(&self, start: StreamId, end: StreamId) -> Vec<StreamEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.id >= start && entry.id <= end)
+            .cloned()
+            .collect()
     }
 
     fn new_id_fully_generated<C: Clock>(&self, c: &C) -> Result<StreamId, RedisError> {
@@ -103,7 +133,7 @@ impl Stream {
     fn last_id_filtered_by_time_part(&self, time_part: Option<u128>) -> Option<StreamId> {
         self.entries
             .iter()
-            .flat_map(|entry| StreamId::parse(&entry.id).ok())
+            .map(|entry| entry.id)
             .filter(|id| time_part.is_none() || time_part == Some(id.milliseconds))
             .last()
     }
@@ -154,7 +184,7 @@ mod tests {
 
         assert_eq!(returned, "0-1");
         assert_eq!(stream.entries.len(), 1);
-        assert_eq!(stream.entries[0].id, "0-1");
+        assert_eq!(stream.entries[0].id.to_string(), "0-1");
         assert_eq!(
             stream.entries[0].fields,
             vec![("foo".to_string(), "bar".to_string())],
@@ -169,7 +199,7 @@ mod tests {
 
         assert_eq!(returned, "1526919030473-0");
         assert_eq!(stream.entries.len(), 1);
-        assert_eq!(stream.entries[0].id, "1526919030473-0");
+        assert_eq!(stream.entries[0].id.to_string(), "1526919030473-0");
         assert_eq!(
             stream.entries[0].fields,
             vec![("foo".to_string(), "bar".to_string())],
@@ -184,7 +214,7 @@ mod tests {
 
         assert_eq!(returned, "0-1");
         assert_eq!(stream.entries.len(), 1);
-        assert_eq!(stream.entries[0].id, "0-1");
+        assert_eq!(stream.entries[0].id.to_string(), "0-1");
         assert_eq!(
             stream.entries[0].fields,
             vec![("foo".to_string(), "bar".to_string())],
@@ -201,7 +231,7 @@ mod tests {
 
         assert_eq!(returned, "1526919030473-3");
         assert_eq!(stream.entries.len(), 2);
-        assert_eq!(stream.entries[1].id, "1526919030473-3");
+        assert_eq!(stream.entries[1].id.to_string(), "1526919030473-3");
         assert_eq!(
             stream.entries[1].fields,
             vec![("foo".to_string(), "bar".to_string())],
@@ -217,7 +247,7 @@ mod tests {
 
         assert_eq!(returned, "1526919035000-0");
         assert_eq!(stream.entries.len(), 2);
-        assert_eq!(stream.entries[1].id, "1526919035000-0");
+        assert_eq!(stream.entries[1].id.to_string(), "1526919035000-0");
         assert_eq!(
             stream.entries[1].fields,
             vec![("foo".to_string(), "bar".to_string())],
@@ -235,7 +265,7 @@ mod tests {
 
         assert_eq!(returned, "123456789-0");
         assert_eq!(stream.entries.len(), 2);
-        assert_eq!(stream.entries[1].id, "123456789-0");
+        assert_eq!(stream.entries[1].id.to_string(), "123456789-0");
         assert_eq!(
             stream.entries[1].fields,
             vec![("foo".to_string(), "bar".to_string())],
@@ -249,7 +279,7 @@ mod tests {
         stream.add("0-1", vec![])?;
         stream.add("0-2", vec![])?;
 
-        let ids: Vec<&str> = stream.entries.iter().map(|e| e.id.as_str()).collect();
+        let ids: Vec<String> = stream.entries.iter().map(|e| e.id.to_string()).collect();
         assert_eq!(ids, vec!["0-1", "0-2"]);
         Ok(())
     }
@@ -320,6 +350,65 @@ mod tests {
         let mut stream = Stream::new();
         stream.add("5-5", vec![])?;
         assert!(stream.add("5-4", vec![]).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_id_parse_range_with_sequence() -> Result<()> {
+        assert_eq!(StreamId::parse_range("5-3", 0)?, StreamId::new(5, 3));
+        assert_eq!(StreamId::parse_range("5-3", u64::MAX)?, StreamId::new(5, 3));
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_id_parse_range_without_sequence_uses_default() -> Result<()> {
+        assert_eq!(StreamId::parse_range("5", 0)?, StreamId::new(5, 0));
+        assert_eq!(StreamId::parse_range("5", u64::MAX)?, StreamId::new(5, u64::MAX));
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_id_parse_range_invalid() {
+        assert!(StreamId::parse_range("abc", 0).is_err());
+        assert!(StreamId::parse_range("5-x", 0).is_err());
+        assert!(StreamId::parse_range("-1", 0).is_err());
+    }
+
+    #[test]
+    fn test_stream_range_inclusive() -> Result<()> {
+        let mut stream = Stream::new();
+        stream.add("0-1", vec![("foo".to_string(), "bar".to_string())])?;
+        stream.add("0-2", vec![("bar".to_string(), "baz".to_string())])?;
+        stream.add("0-3", vec![("baz".to_string(), "foo".to_string())])?;
+
+        let result = stream.range(StreamId::new(0, 2), StreamId::new(0, 3));
+        let ids: Vec<String> = result.iter().map(|e| e.id.to_string()).collect();
+        assert_eq!(ids, vec!["0-2", "0-3"]);
+        assert_eq!(result[0].fields, vec![("bar".to_string(), "baz".to_string())]);
+        assert_eq!(result[1].fields, vec![("baz".to_string(), "foo".to_string())]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_range_empty_when_no_match() -> Result<()> {
+        let mut stream = Stream::new();
+        stream.add("0-1", vec![])?;
+        assert!(stream.range(StreamId::new(5, 0), StreamId::new(9, 0)).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_range_uses_default_sequences() -> Result<()> {
+        let mut stream = Stream::new();
+        stream.add("5-0", vec![])?;
+        stream.add("5-9", vec![])?;
+        stream.add("6-0", vec![])?;
+
+        // start "5" -> 5-0, end "5" -> 5-MAX: should capture both 5-* entries.
+        let start = StreamId::parse_range("5", 0)?;
+        let end = StreamId::parse_range("5", u64::MAX)?;
+        let ids: Vec<String> = stream.range(start, end).iter().map(|e| e.id.to_string()).collect();
+        assert_eq!(ids, vec!["5-0".to_string(), "5-9".to_string()]);
         Ok(())
     }
 

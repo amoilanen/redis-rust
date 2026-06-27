@@ -85,7 +85,7 @@ mod tests {
         assert!(guard.contains_stream("stream_key"));
         let stream = guard.get_stream("stream_key").unwrap();
         assert_eq!(stream.entries.len(), 1);
-        assert_eq!(stream.entries[0].id, "0-1");
+        assert_eq!(stream.entries[0].id.to_string(), "0-1");
         assert_eq!(
             stream.entries[0].fields,
             vec![("foo".to_string(), "bar".to_string())],
@@ -103,7 +103,7 @@ mod tests {
 
         let guard = storage.lock().unwrap();
         let stream = guard.get_stream("stream_key").unwrap();
-        let ids: Vec<&str> = stream.entries.iter().map(|e| e.id.as_str()).collect();
+        let ids: Vec<String> = stream.entries.iter().map(|e| e.id.to_string()).collect();
         assert_eq!(ids, vec!["0-1", "0-2"]);
         Ok(())
     }

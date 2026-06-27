@@ -16,7 +16,7 @@ use log::*;
 use std::collections::HashMap;
 
 use crate::storage::{Storage, StoredValue, Value};
-use crate::stream::{Stream, StreamEntry};
+use crate::stream::{Stream, StreamEntry, StreamId};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -284,7 +284,7 @@ pub fn write_string(buf: &mut Vec<u8>, data: &[u8]) {
 fn write_stream(buf: &mut Vec<u8>, stream: &Stream) {
     buf.extend(encode_length(stream.entries.len()));
     for entry in &stream.entries {
-        write_string(buf, entry.id.as_bytes());
+        write_string(buf, entry.id.to_string().as_bytes());
         buf.extend(encode_length(entry.fields.len()));
         for (name, value) in &entry.fields {
             write_string(buf, name.as_bytes());
@@ -297,8 +297,9 @@ fn read_stream<R: Read>(reader: &mut R) -> Result<Stream> {
     let entry_count = decode_length(reader)?;
     let mut entries = Vec::with_capacity(entry_count);
     for _ in 0..entry_count {
-        let id = String::from_utf8(read_string(reader)?)
+        let id_str = String::from_utf8(read_string(reader)?)
             .context("Stream entry ID is not valid UTF-8")?;
+        let id = StreamId::parse(&id_str).context("Stream entry ID is not a valid stream ID")?;
         let field_count = decode_length(reader)?;
         let mut fields = Vec::with_capacity(field_count);
         for _ in 0..field_count {

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::Cursor;
 use crate::rdb;
-use crate::stream::Stream;
+use crate::stream::{Stream, StreamEntry, StreamId};
 
 /// The payload held at a key. Strings and lists are stored as opaque bytes
 /// (lists as a RESP-serialized Array); streams are stored as a [`Stream`].
@@ -144,6 +144,12 @@ impl Storage {
 
     pub fn contains_stream(&self, key: &str) -> bool {
         self.get_stream(key).is_some()
+    }
+
+    pub fn xrange(&self, key: &str, start: StreamId, end: StreamId) -> Vec<StreamEntry> {
+        self.get_stream(key)
+            .map(|stream| stream.range(start, end))
+            .unwrap_or_default()
     }
 
     pub fn to_rdb(&self) -> Result<Vec<u8>, Error> {
@@ -398,6 +404,25 @@ mod tests {
         assert!(storage.xadd("k", "0-1", vec![]).is_err());
         assert!(!storage.contains_stream("k"));
         Ok(())
+    }
+
+    #[test]
+    fn test_xrange_returns_inclusive_range() -> Result<(), anyhow::Error> {
+        let mut storage = Storage::new(HashMap::new());
+        storage.xadd("s", "0-1", vec![("a".to_string(), "1".to_string())])?;
+        storage.xadd("s", "0-2", vec![("b".to_string(), "2".to_string())])?;
+        storage.xadd("s", "0-3", vec![("c".to_string(), "3".to_string())])?;
+
+        let entries = storage.xrange("s", StreamId::new(0, 2), StreamId::new(0, 3));
+        let ids: Vec<String> = entries.iter().map(|e| e.id.to_string()).collect();
+        assert_eq!(ids, vec!["0-2", "0-3"]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_xrange_missing_key_is_empty() {
+        let storage = Storage::new(HashMap::new());
+        assert!(storage.xrange("missing", StreamId::ZERO, StreamId::new(u128::MAX, u64::MAX)).is_empty());
     }
 
     #[test]

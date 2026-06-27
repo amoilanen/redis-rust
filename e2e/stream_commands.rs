@@ -78,6 +78,39 @@ fn test_xadd_rejects_invalid_id() -> Result<()> {
 }
 
 #[test]
+fn test_xrange_returns_entries_in_range() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    client.send_command(&["XADD", "stream_key", "0-1", "foo", "bar"])?;
+    client.send_command(&["XADD", "stream_key", "0-2", "bar", "baz"])?;
+    client.send_command(&["XADD", "stream_key", "0-3", "baz", "foo"])?;
+
+    // Read as JSON so the assert reflects the real nested array structure:
+    // an array of [id, [field, value, ...]] entries.
+    let resp = client.send_command_json(&["XRANGE", "stream_key", "0-2", "0-3"])?;
+    assert_eq!(resp, r#"[["0-2",["bar","baz"]],["0-3",["baz","foo"]]]"#);
+    Ok(())
+}
+
+#[test]
+fn test_xrange_omitted_sequence_numbers() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    client.send_command(&["XADD", "stream_key", "5-0", "a", "1"])?;
+    client.send_command(&["XADD", "stream_key", "5-9", "b", "2"])?;
+    client.send_command(&["XADD", "stream_key", "6-0", "c", "3"])?;
+
+    // start "5" -> 5-0, end "5" -> 5-MAX captures both 5-* entries but not 6-0.
+    let resp = client.send_command_json(&["XRANGE", "stream_key", "5", "5"])?;
+    assert_eq!(resp, r#"[["5-0",["a","1"]],["5-9",["b","2"]]]"#);
+    Ok(())
+}
+
+#[test]
 fn test_type_of_stream_key() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);
