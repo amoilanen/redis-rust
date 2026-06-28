@@ -33,29 +33,35 @@ impl RedisCommand for XRead {
             message: format!("ERR cannot parse 'xread' command: {}", self.message.as_string()?),
         };
 
-        // Only the single-stream `XREAD STREAMS <key> <id>` form is supported
-        // for now; optional arguments (COUNT, BLOCK, multiple streams) come later.
-        if instructions.len() != 4 || !instructions[1].eq_ignore_ascii_case("STREAMS") {
+        // `XREAD STREAMS <key1> <key2> ... <id1> <id2> ...`: the STREAMS keyword
+        // is followed by N keys and then their N corresponding IDs. Optional
+        // arguments (COUNT, BLOCK) come later.
+        if !instructions[1].eq_ignore_ascii_case("STREAMS") {
             return Err(error.into());
         }
+        let args = &instructions[2..];
+        if args.is_empty() || args.len() % 2 != 0 {
+            return Err(error.into());
+        }
+        let (keys, ids) = args.split_at(args.len() / 2);
 
-        let key = &instructions[2];
-        // XREAD is exclusive, so a bare `<ms>` reads everything after that
-        // millisecond's first entry; the sequence therefore defaults to 0.
-        let after = StreamId::parse_range(&instructions[3], 0)?;
-
-        debug!("XREAD STREAMS {} {}", key, after);
-
-        let entries = storage
+        let storage = storage
             .lock()
-            .map_err(|e| anyhow!("Failed to lock storage: {}", e))?
-            .xread(key, after);
+            .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
 
-        let stream = protocol::array(vec![
-            protocol::bulk_string(key),
-            encode_entries(&entries),
-        ]);
-        Ok(vec![protocol::array(vec![stream])])
+        let mut streams = Vec::with_capacity(keys.len());
+        for (key, id) in keys.iter().zip(ids) {
+            let after = StreamId::parse_range(id, 0)?;
+            debug!("XREAD STREAMS {} {}", key, after);
+
+            let entries = storage.xread(key, after);
+            streams.push(protocol::array(vec![
+                protocol::bulk_string(key),
+                encode_entries(&entries),
+            ]));
+        }
+
+        Ok(vec![protocol::array(streams)])
     }
 
     fn is_propagated_to_replicas(&self) -> bool {
@@ -111,6 +117,43 @@ mod tests {
                             protocol::bulk_string("38"),
                         ]),
                 ])])])]);
+        assert_eq!(result, vec![expected]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_xread_multiple_streams() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        xadd(&["XADD", "stream_key", "0-1", "temperature", "95"]).execute(&storage)?;
+        xadd(&["XADD", "other_stream_key", "0-2", "humidity", "97"]).execute(&storage)?;
+
+        let result = xread_cmd(&[
+            "XREAD", "STREAMS", "stream_key", "other_stream_key", "0-0", "0-1",
+        ])
+        .execute(&storage)?;
+
+        let expected = protocol::array(vec![
+            protocol::array(vec![
+                protocol::bulk_string("stream_key"),
+                protocol::array(vec![protocol::array(vec![
+                    protocol::bulk_string("0-1"),
+                    protocol::array(vec![
+                        protocol::bulk_string("temperature"),
+                        protocol::bulk_string("95"),
+                    ]),
+                ])]),
+            ]),
+            protocol::array(vec![
+                protocol::bulk_string("other_stream_key"),
+                protocol::array(vec![protocol::array(vec![
+                    protocol::bulk_string("0-2"),
+                    protocol::array(vec![
+                        protocol::bulk_string("humidity"),
+                        protocol::bulk_string("97"),
+                    ]),
+                ])]),
+            ]),
+        ]);
         assert_eq!(result, vec![expected]);
         Ok(())
     }
