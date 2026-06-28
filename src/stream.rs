@@ -42,6 +42,14 @@ impl StreamId {
             message: "ERR Invalid stream ID specified as stream command argument".to_string(),
         };
 
+        // `-` and `+` are shorthands for the smallest and largest possible IDs,
+        // letting XRANGE span from the very first or to the very last entry.
+        match id {
+            "-" => return Ok(StreamId::ZERO),
+            "+" => return Ok(StreamId { milliseconds: u128::MAX, sequence: u64::MAX }),
+            _ => {}
+        }
+
         match id.split_once('-') {
             Some((ms, seq)) => Ok(StreamId {
                 milliseconds: ms.parse().map_err(|_| invalid())?,

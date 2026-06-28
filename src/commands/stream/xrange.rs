@@ -146,6 +146,52 @@ mod tests {
     }
 
     #[test]
+    fn test_xrange_start_dash_reads_from_beginning() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        xadd(&["XADD", "stream_key", "0-1", "foo", "bar"]).execute(&storage)?;
+        xadd(&["XADD", "stream_key", "0-2", "bar", "baz"]).execute(&storage)?;
+        xadd(&["XADD", "stream_key", "0-3", "baz", "foo"]).execute(&storage)?;
+
+        let result = xrange_cmd(&["XRANGE", "stream_key", "-", "0-2"]).execute(&storage)?;
+
+        let expected = protocol::array(vec![
+            protocol::array(vec![
+                protocol::bulk_string("0-1"),
+                protocol::array(vec![protocol::bulk_string("foo"), protocol::bulk_string("bar")]),
+            ]),
+            protocol::array(vec![
+                protocol::bulk_string("0-2"),
+                protocol::array(vec![protocol::bulk_string("bar"), protocol::bulk_string("baz")]),
+            ]),
+        ]);
+        assert_eq!(result, vec![expected]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_xrange_end_plus_reads_until_end() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        xadd(&["XADD", "stream_key", "0-1", "foo", "bar"]).execute(&storage)?;
+        xadd(&["XADD", "stream_key", "0-2", "bar", "baz"]).execute(&storage)?;
+        xadd(&["XADD", "stream_key", "0-3", "baz", "foo"]).execute(&storage)?;
+
+        let result = xrange_cmd(&["XRANGE", "stream_key", "0-2", "+"]).execute(&storage)?;
+
+        let expected = protocol::array(vec![
+            protocol::array(vec![
+                protocol::bulk_string("0-2"),
+                protocol::array(vec![protocol::bulk_string("bar"), protocol::bulk_string("baz")]),
+            ]),
+            protocol::array(vec![
+                protocol::bulk_string("0-3"),
+                protocol::array(vec![protocol::bulk_string("baz"), protocol::bulk_string("foo")]),
+            ]),
+        ]);
+        assert_eq!(result, vec![expected]);
+        Ok(())
+    }
+
+    #[test]
     fn test_xrange_multiple_field_value_pairs() -> anyhow::Result<()> {
         let storage = create_test_storage();
         xadd(&["XADD", "s", "1-1", "temperature", "36", "humidity", "95"]).execute(&storage)?;
