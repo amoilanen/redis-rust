@@ -14,11 +14,11 @@ use anyhow::anyhow;
 use log::*;
 
 use crate::commands::RedisCommand;
+use crate::commands::stream::encode_entries;
 use crate::error::RedisError;
-use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
-use crate::stream::{StreamEntry, StreamId};
+use crate::stream::StreamId;
 
 /// XRANGE command implementation.
 pub struct XRange {
@@ -65,34 +65,12 @@ impl RedisCommand for XRange {
     }
 }
 
-/// Encodes stream entries as a RESP array of `[id, [field, value, ...]]` pairs.
-fn encode_entries(entries: &[StreamEntry]) -> DataType {
-    let encoded = entries.iter().map(encode_entry).collect();
-    protocol::array(encoded)
-}
-
-fn encode_entry(entry: &StreamEntry) -> DataType {
-    let mut fields: Vec<DataType> = Vec::with_capacity(entry.fields.len() * 2);
-    for (field, value) in &entry.fields {
-        fields.push(protocol::bulk_string(field));
-        fields.push(protocol::bulk_string(value));
-    }
-    protocol::array(vec![
-        protocol::bulk_string(&entry.id.to_string()),
-        protocol::array(fields),
-    ])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::commands::create_test_storage;
-    use crate::commands::stream::XAdd;
-
-    fn xadd(parts: &[&str]) -> XAdd {
-        let elements = parts.iter().map(|p| protocol::bulk_string(p)).collect();
-        XAdd { message: protocol::array(elements) }
-    }
+    use crate::commands::stream::xadd;
+    use crate::protocol;
 
     fn xrange_cmd(parts: &[&str]) -> XRange {
         let elements = parts.iter().map(|p| protocol::bulk_string(p)).collect();

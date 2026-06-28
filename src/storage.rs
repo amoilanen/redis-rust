@@ -152,6 +152,12 @@ impl Storage {
             .unwrap_or_default()
     }
 
+    pub fn xread(&self, key: &str, after: StreamId) -> Vec<StreamEntry> {
+        self.get_stream(key)
+            .map(|stream| stream.read(after))
+            .unwrap_or_default()
+    }
+
     pub fn to_rdb(&self) -> Result<Vec<u8>, Error> {
         let mut buffer: Vec<u8> = Vec::new();
         let mut writer = Cursor::new(&mut buffer);
@@ -423,6 +429,26 @@ mod tests {
     fn test_xrange_missing_key_is_empty() {
         let storage = Storage::new(HashMap::new());
         assert!(storage.xrange("missing", StreamId::ZERO, StreamId::new(u128::MAX, u64::MAX)).is_empty());
+    }
+
+    #[test]
+    fn test_xread_returns_entries_after_id_exclusive() -> Result<(), anyhow::Error> {
+        let mut storage = Storage::new(HashMap::new());
+        storage.xadd("s", "0-1", vec![("a".to_string(), "1".to_string())])?;
+        storage.xadd("s", "0-2", vec![("b".to_string(), "2".to_string())])?;
+        storage.xadd("s", "0-3", vec![("c".to_string(), "3".to_string())])?;
+
+        // XREAD is exclusive: reading after 0-1 skips 0-1 itself.
+        let entries = storage.xread("s", StreamId::new(0, 1));
+        let ids: Vec<String> = entries.iter().map(|e| e.id.to_string()).collect();
+        assert_eq!(ids, vec!["0-2", "0-3"]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_xread_missing_key_is_empty() {
+        let storage = Storage::new(HashMap::new());
+        assert!(storage.xread("missing", StreamId::ZERO).is_empty());
     }
 
     #[test]

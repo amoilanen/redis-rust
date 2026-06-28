@@ -111,6 +111,22 @@ fn test_xrange_omitted_sequence_numbers() -> Result<()> {
 }
 
 #[test]
+fn test_xread_returns_entries_after_id_exclusive() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    client.send_command(&["XADD", "stream_key", "1-0", "temperature", "36"])?;
+    client.send_command(&["XADD", "stream_key", "2-0", "temperature", "37"])?;
+    client.send_command(&["XADD", "stream_key", "3-0", "temperature", "38"])?;
+    client.send_command(&["XADD", "stream_key", "4-0", "temperature", "39"])?;
+
+    let resp = client.send_command_json(&["XREAD", "STREAMS", "stream_key", "2-0"])?;
+    assert_eq!(resp, r#"[["stream_key",[["3-0",["temperature","38"]],["4-0",["temperature","39"]]]]]"#);
+    Ok(())
+}
+
+#[test]
 fn test_type_of_stream_key() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);

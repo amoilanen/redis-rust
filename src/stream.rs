@@ -121,6 +121,16 @@ impl Stream {
             .collect()
     }
 
+    /// Returns the entries whose IDs are strictly greater than `after`,
+    /// preserving insertion order. This is the exclusive read used by XREAD.
+    pub fn read(&self, after: StreamId) -> Vec<StreamEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.id > after)
+            .cloned()
+            .collect()
+    }
+
     fn new_id_fully_generated<C: Clock>(&self, c: &C) -> Result<StreamId, RedisError> {
         let current_timestamp = c.now().duration_since(UNIX_EPOCH).map_err(|e| RedisError::new(&format!("Error getting current time {}", e)) )?;
         Ok(StreamId::new(current_timestamp.as_millis(), 0))

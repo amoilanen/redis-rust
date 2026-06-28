@@ -29,7 +29,7 @@ pub use info::Info;
 pub use replconf::ReplConf;
 pub use psync::PSync;
 pub use list::{RPush, LPush, LRange, LLen, LPop, BLPop};
-pub use stream::{XAdd, XRange};
+pub use stream::{XAdd, XRange, XRead};
 pub use r#type::Type;
 
 /// Trait for implementing Redis commands.

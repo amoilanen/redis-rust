@@ -65,16 +65,12 @@ impl RedisCommand for XAdd {
 mod tests {
     use super::*;
     use crate::commands::create_test_storage;
-
-    fn xadd_cmd(parts: &[&str]) -> XAdd {
-        let elements = parts.iter().map(|p| protocol::bulk_string(p)).collect();
-        XAdd { message: protocol::array(elements) }
-    }
+    use crate::commands::stream::xadd;
 
     #[test]
     fn test_xadd_creates_stream_and_returns_id() -> anyhow::Result<()> {
         let storage = create_test_storage();
-        let cmd = xadd_cmd(&["XADD", "stream_key", "0-1", "foo", "bar"]);
+        let cmd = xadd(&["XADD", "stream_key", "0-1", "foo", "bar"]);
 
         let result = cmd.execute(&storage)?;
         assert_eq!(result.len(), 1);
@@ -96,8 +92,8 @@ mod tests {
     #[test]
     fn test_xadd_appends_to_existing_stream() -> anyhow::Result<()> {
         let storage = create_test_storage();
-        xadd_cmd(&["XADD", "stream_key", "0-1", "foo", "bar"]).execute(&storage)?;
-        let result = xadd_cmd(&["XADD", "stream_key", "0-2", "baz", "qux"]).execute(&storage)?;
+        xadd(&["XADD", "stream_key", "0-1", "foo", "bar"]).execute(&storage)?;
+        let result = xadd(&["XADD", "stream_key", "0-2", "baz", "qux"]).execute(&storage)?;
 
         assert_eq!(result[0], protocol::bulk_string("0-2"));
 
@@ -111,7 +107,7 @@ mod tests {
     #[test]
     fn test_xadd_multiple_field_value_pairs() -> anyhow::Result<()> {
         let storage = create_test_storage();
-        let result = xadd_cmd(&[
+        let result = xadd(&[
             "XADD", "stream_key", "1-1", "temperature", "36", "humidity", "95",
         ])
         .execute(&storage)?;
@@ -142,7 +138,7 @@ mod tests {
         ]);
         Set { message: set_msg }.execute(&storage)?;
 
-        assert!(xadd_cmd(&["XADD", "mykey", "0-1", "foo", "bar"]).execute(&storage).is_err());
+        assert!(xadd(&["XADD", "mykey", "0-1", "foo", "bar"]).execute(&storage).is_err());
         assert!(!storage.lock().unwrap().contains_stream("mykey"));
         Ok(())
     }
@@ -150,9 +146,9 @@ mod tests {
     #[test]
     fn test_xadd_rejects_id_not_greater_than_top() -> anyhow::Result<()> {
         let storage = create_test_storage();
-        xadd_cmd(&["XADD", "stream_key", "1-1", "foo", "bar"]).execute(&storage)?;
+        xadd(&["XADD", "stream_key", "1-1", "foo", "bar"]).execute(&storage)?;
 
-        let err = xadd_cmd(&["XADD", "stream_key", "1-1", "baz", "foo"])
+        let err = xadd(&["XADD", "stream_key", "1-1", "baz", "foo"])
             .execute(&storage)
             .unwrap_err()
             .downcast::<RedisError>()?;
@@ -171,7 +167,7 @@ mod tests {
     fn test_xadd_rejects_zero_id() -> anyhow::Result<()> {
         let storage = create_test_storage();
 
-        let err = xadd_cmd(&["XADD", "stream_key", "0-0", "foo", "bar"])
+        let err = xadd(&["XADD", "stream_key", "0-0", "foo", "bar"])
             .execute(&storage)
             .unwrap_err()
             .downcast::<RedisError>()?;
@@ -187,13 +183,13 @@ mod tests {
         let storage = create_test_storage();
 
         // Missing id and fields
-        assert!(xadd_cmd(&["XADD", "stream_key"]).execute(&storage).is_err());
+        assert!(xadd(&["XADD", "stream_key"]).execute(&storage).is_err());
         // Missing fields
-        assert!(xadd_cmd(&["XADD", "stream_key", "0-1"]).execute(&storage).is_err());
+        assert!(xadd(&["XADD", "stream_key", "0-1"]).execute(&storage).is_err());
         // Odd number of field-value arguments
-        assert!(xadd_cmd(&["XADD", "stream_key", "0-1", "foo"]).execute(&storage).is_err());
+        assert!(xadd(&["XADD", "stream_key", "0-1", "foo"]).execute(&storage).is_err());
         assert!(
-            xadd_cmd(&["XADD", "stream_key", "0-1", "foo", "bar", "baz"])
+            xadd(&["XADD", "stream_key", "0-1", "foo", "bar", "baz"])
                 .execute(&storage)
                 .is_err()
         );
