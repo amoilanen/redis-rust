@@ -134,7 +134,11 @@ mod tests {
             protocol::bulk_string("foo"),
             protocol::bulk_string("bar"),
         ]);
-        crate::commands::stream::XAdd { message: xadd_msg }.execute(&storage)?;
+        crate::commands::stream::XAdd {
+            message: xadd_msg,
+            notifier: std::sync::Arc::new(crate::blocking::BlockingNotifier::new()),
+        }
+        .execute(&storage)?;
 
         let result = type_cmd("stream_key").execute(&storage)?;
         assert_eq!(result[0], protocol::simple_string("stream"));
@@ -151,7 +155,11 @@ mod tests {
             protocol::bulk_string("foo"),
             protocol::bulk_string("bar"),
         ]);
-        crate::commands::stream::XAdd { message: xadd_msg }.execute(&storage)?;
+        crate::commands::stream::XAdd {
+            message: xadd_msg,
+            notifier: std::sync::Arc::new(crate::blocking::BlockingNotifier::new()),
+        }
+        .execute(&storage)?;
         let set_msg = protocol::array(vec![
             protocol::bulk_string("SET"),
             protocol::bulk_string("k"),

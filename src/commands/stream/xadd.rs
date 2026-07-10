@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::anyhow;
 use log::*;
 
+use crate::blocking::BlockingNotifier;
 use crate::commands::RedisCommand;
 use crate::error::RedisError;
 use crate::protocol;
@@ -17,6 +18,7 @@ use crate::storage::Storage;
 /// XADD command implementation.
 pub struct XAdd {
     pub message: DataType,
+    pub notifier: Arc<BlockingNotifier>,
 }
 
 impl RedisCommand for XAdd {
@@ -40,10 +42,14 @@ impl RedisCommand for XAdd {
 
         debug!("XADD {} {} {:?}", key, id, fields);
 
-        let stored_id = storage
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock storage: {}", e))?
-            .xadd(key, id, fields)?;
+        let stored_id = {
+            let mut storage = storage
+                .lock()
+                .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
+            let stored_id = storage.xadd(key, id, fields)?;
+            self.notifier.notify_stream(key)?;
+            stored_id
+        };
 
         Ok(vec![protocol::bulk_string(&stored_id)])
     }

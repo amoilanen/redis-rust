@@ -140,9 +140,9 @@ fn build_command(
         "LPOP"     => Box::new(LPop { message }),
         "BLPOP"    => Box::new(BLPop { message, notifier: notifier() }),
         "TYPE"     => Box::new(Type { message }),
-        "XADD"     => Box::new(XAdd { message }),
+        "XADD"     => Box::new(XAdd { message, notifier: notifier() }),
         "XRANGE"   => Box::new(XRange { message }),
-        "XREAD"    => Box::new(XRead { message }),
+        "XREAD"    => Box::new(XRead { message, notifier: notifier() }),
         "PSYNC"    => Box::new(PSync { message, server_state: state() }),
         _ => return None,
     };

@@ -38,12 +38,14 @@ use crate::protocol::DataType;
 
 pub struct BlockingNotifier {
     waiters: Mutex<HashMap<String, VecDeque<Sender<DataType>>>>,
+    stream_waiters: Mutex<HashMap<String, Vec<Sender<()>>>>,
 }
 
 impl BlockingNotifier {
     pub fn new() -> Self {
         BlockingNotifier {
             waiters: Mutex::new(HashMap::new()),
+            stream_waiters: Mutex::new(HashMap::new()),
         }
     }
 
@@ -90,6 +92,51 @@ impl BlockingNotifier {
             }
             if queue.is_empty() {
                 waiters_map.remove(key);
+            }
+        }
+        Ok(())
+    }
+
+    /// Register the calling reader as a waiter on every key in `keys`.
+    ///
+    /// Returns a single `Receiver` that is woken when *any* of the keys gains a
+    /// new entry — the natural shape for `XREAD BLOCK` over multiple streams.
+    /// One clone of the sender is parked under each key; `notify_stream` drains
+    /// and fires them all, so the woken reader re-registers on the next loop
+    /// iteration if it still needs to wait.
+    ///
+    /// Like [`register`](Self::register), this must be called *while holding the
+    /// storage `Mutex`* so a concurrent XADD cannot slip an entry in between the
+    /// reader's read and its registration (a lost wake-up).
+    pub fn register_streams(&self, keys: &[String]) -> Result<Receiver<()>> {
+        let (tx, rx) = mpsc::channel::<()>();
+        let mut waiters = self
+            .stream_waiters
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock stream waiters: {}", e))?;
+        for key in keys {
+            waiters
+                .entry(key.clone())
+                .or_insert_with(Vec::new)
+                .push(tx.clone());
+        }
+        Ok(rx)
+    }
+
+    /// Wake every reader currently blocked on `key`.
+    ///
+    /// Called by XADD *while holding the storage `Mutex`*, right after the new
+    /// entry is appended. All parked senders are drained; a failed `send`
+    /// (receiver already gone) is ignored, which also discards stale senders
+    /// left behind by readers that have since moved on or timed out.
+    pub fn notify_stream(&self, key: &str) -> Result<()> {
+        let mut waiters = self
+            .stream_waiters
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock stream waiters: {}", e))?;
+        if let Some(senders) = waiters.remove(key) {
+            for tx in senders {
+                let _ = tx.send(());
             }
         }
         Ok(())

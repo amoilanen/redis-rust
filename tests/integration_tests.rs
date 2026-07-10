@@ -704,6 +704,7 @@ fn e2e_stream_commands_public_api_smoke_test() -> Result<()> {
             protocol::bulk_string("temperature"),
             protocol::bulk_string("36"),
         ]),
+        notifier: Arc::new(BlockingNotifier::new()),
     }
     .execute(&storage)?;
     assert_eq!(added[0], protocol::bulk_string("0-1"));

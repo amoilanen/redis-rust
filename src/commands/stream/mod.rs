@@ -45,6 +45,11 @@ fn encode_entry(entry: &StreamEntry) -> DataType {
 
 #[cfg(test)]
 fn xadd(parts: &[&str]) -> XAdd {
+    use std::sync::Arc;
+    use crate::blocking::BlockingNotifier;
     let elements = parts.iter().map(|p| protocol::bulk_string(p)).collect();
-    XAdd { message: protocol::array(elements) }
+    XAdd {
+        message: protocol::array(elements),
+        notifier: Arc::new(BlockingNotifier::new()),
+    }
 }
