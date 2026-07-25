@@ -463,15 +463,63 @@ mod tests {
     }
 
     #[test]
-    fn test_xread_dollar_on_missing_stream_reads_from_zero() -> anyhow::Result<()> {
+    fn test_resolve_afters_maps_dollar_to_current_last_id() -> anyhow::Result<()> {
         let storage = create_test_storage();
+        xadd(&["XADD", "stream_key", "0-1", "temperature", "96"]).execute(&storage)?;
+        xadd(&["XADD", "stream_key", "5-7", "temperature", "97"]).execute(&storage)?;
 
-        // An unknown stream has no last ID, so `$` falls back to 0-0.
-        let result = xread_cmd(&["XREAD", "STREAMS", "missing", "$"]).execute(&storage)?;
+        let keys = vec![
+            "stream_key".to_string(),
+            "missing".to_string(),
+            "stream_key".to_string(),
+        ];
+        let ids = vec!["$".to_string(), "$".to_string(), "0-1".to_string()];
 
+        let afters = resolve_afters(&storage, &keys, &ids)?;
+
+        // `$` is the stream's newest ID (not its first, and not a maximal
+        // sentinel); an unknown stream has no last ID, so it falls back to 0-0;
+        // an explicit ID alongside a `$` is still parsed literally.
+        assert_eq!(
+            afters,
+            vec![StreamId::new(5, 7), StreamId::ZERO, StreamId::new(0, 1)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_xread_block_dollar_on_missing_stream_wakes_on_first_entry() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let notifier = notifier();
+
+        let storage_for_waiter = Arc::clone(&storage);
+        let notifier_for_waiter = Arc::clone(&notifier);
+        // The stream does not exist yet, so `$` must fall back to 0-0. A maximal
+        // fallback would park this reader forever and time the test out instead.
+        let waiter = thread::spawn(move || {
+            xread_with(
+                &["XREAD", "BLOCK", "10000", "STREAMS", "brand_new", "$"],
+                &notifier_for_waiter,
+            )
+            .execute(&storage_for_waiter)
+            .expect("XREAD failed")
+        });
+
+        // Give the reader time to park before creating the stream that wakes it.
+        thread::sleep(Duration::from_millis(100));
+        xadd_with(&["XADD", "brand_new", "0-1", "temperature", "96"], &notifier)
+            .execute(&storage)?;
+
+        let result = waiter.join().expect("waiter panicked");
         let expected = protocol::array(vec![protocol::array(vec![
-            protocol::bulk_string("missing"),
-            protocol::array(vec![]),
+            protocol::bulk_string("brand_new"),
+            protocol::array(vec![protocol::array(vec![
+                protocol::bulk_string("0-1"),
+                protocol::array(vec![
+                    protocol::bulk_string("temperature"),
+                    protocol::bulk_string("96"),
+                ]),
+            ])]),
         ])]);
         assert_eq!(result, vec![expected]);
         Ok(())
