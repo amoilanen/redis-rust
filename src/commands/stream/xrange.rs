@@ -68,13 +68,12 @@ impl RedisCommand for XRange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::create_test_storage;
+    use crate::commands::{command_message, create_test_storage};
     use crate::commands::stream::xadd;
     use crate::protocol;
 
     fn xrange_cmd(parts: &[&str]) -> XRange {
-        let elements = parts.iter().map(|p| protocol::bulk_string(p)).collect();
-        XRange { message: protocol::array(elements) }
+        XRange { message: command_message(parts) }
     }
 
     #[test]

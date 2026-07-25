@@ -12,6 +12,7 @@ pub mod ping;
 pub mod command;
 pub mod set;
 pub mod get;
+pub mod incr;
 pub mod info;
 pub mod replconf;
 pub mod psync;
@@ -25,6 +26,7 @@ pub use ping::Ping;
 pub use command::Command;
 pub use set::Set;
 pub use get::Get;
+pub use incr::Incr;
 pub use info::Info;
 pub use replconf::ReplConf;
 pub use psync::PSync;
@@ -66,6 +68,14 @@ pub fn parse_command_name(received_message: &DataType) -> Result<String, anyhow:
     Ok(command_name)
 }
 
+// ---------------------------------------------------------------------------
+// Test-only helpers shared across the command unit tests.
+//
+// Private by design: Rust's visibility rules still make them reachable from
+// every descendant module (each command and its `#[cfg(test)] mod tests`),
+// while `#[cfg(test)]` strips them from release builds entirely.
+// ---------------------------------------------------------------------------
+
 /// Build a fresh, empty `Storage` wrapped in an `Arc<Mutex<...>>` for unit tests.
 #[cfg(test)]
 fn create_test_storage() -> Arc<Mutex<Storage>> {
@@ -73,18 +83,40 @@ fn create_test_storage() -> Arc<Mutex<Storage>> {
     Arc::new(Mutex::new(Storage::new(HashMap::new())))
 }
 
+/// Build a fresh `BlockingNotifier` for the commands that take one (RPUSH,
+/// LPUSH, BLPOP, XADD, XREAD). Tests that never block still need one to
+/// construct the command.
+#[cfg(test)]
+fn create_test_notifier() -> Arc<crate::blocking::BlockingNotifier> {
+    Arc::new(crate::blocking::BlockingNotifier::new())
+}
+
+/// Build a RESP command message - an Array of bulk strings - from its parts.
+///
+/// `command_message(&["SET", "foo", "41"])` is the wire form a client sends,
+/// which is exactly what every command struct takes as its `message`.
+#[cfg(test)]
+fn command_message(parts: &[&str]) -> DataType {
+    crate::protocol::array(parts.iter().map(|p| crate::protocol::bulk_string(p)).collect())
+}
+
+/// Build a `SET` command from its parts, e.g. `set(&["SET", "foo", "41"])` or
+/// `set(&["SET", "foo", "41", "px", "100"])`.
+///
+/// Seeding a string key is a fixture for many other commands' tests (GET,
+/// TYPE, INCR, ...), so the builder lives here rather than in one of them.
+#[cfg(test)]
+fn set(parts: &[&str]) -> Set {
+    Set { message: command_message(parts) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol;
 
     #[test]
     fn test_parse_command_name_valid() {
-        let msg = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("key"),
-            protocol::bulk_string("value"),
-        ]);
+        let msg = command_message(&["SET", "key", "value"]);
 
         let name = parse_command_name(&msg).unwrap();
         assert_eq!(name, "SET");
@@ -92,9 +124,7 @@ mod tests {
 
     #[test]
     fn test_parse_command_name_single() {
-        let msg = protocol::array(vec![
-            protocol::bulk_string("PING"),
-        ]);
+        let msg = command_message(&["PING"]);
 
         let name = parse_command_name(&msg).unwrap();
         assert_eq!(name, "PING");

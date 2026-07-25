@@ -55,7 +55,7 @@ impl RedisCommand for Get {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::create_test_storage;
+    use crate::commands::{command_message, create_test_storage, set};
 
     fn insert_test_data(storage: &Arc<Mutex<Storage>>, key: &str, value: &str) {
         let mut data = storage.lock().unwrap();
@@ -67,10 +67,7 @@ mod tests {
         let storage = create_test_storage();
         insert_test_data(&storage, "mykey", "myvalue");
 
-        let message = protocol::array(vec![
-            protocol::bulk_string("GET"),
-            protocol::bulk_string("mykey"),
-        ]);
+        let message = command_message(&["GET", "mykey"]);
         let cmd = Get { message };
 
         let result = cmd.execute(&storage).unwrap();
@@ -82,10 +79,7 @@ mod tests {
 
     #[test]
     fn test_get_command_not_found() {
-        let message = protocol::array(vec![
-            protocol::bulk_string("GET"),
-            protocol::bulk_string("nonexistent"),
-        ]);
+        let message = command_message(&["GET", "nonexistent"]);
         let cmd = Get { message };
 
         let storage = create_test_storage();
@@ -97,7 +91,7 @@ mod tests {
 
     #[test]
     fn test_get_command_invalid_syntax() {
-        let message = protocol::array(vec![protocol::bulk_string("GET")]);
+        let message = command_message(&["GET"]);
         let cmd = Get { message };
 
         let storage = create_test_storage();
@@ -111,24 +105,12 @@ mod tests {
         let storage = create_test_storage();
 
         // Set a value
-        let set_message = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("test_key"),
-            protocol::bulk_string("test_value"),
-        ]);
-        let set_cmd = super::super::set::Set {
-            message: set_message,
-        };
-        let set_result = set_cmd.execute(&storage).unwrap();
+        let set_result = set(&["SET", "test_key", "test_value"]).execute(&storage).unwrap();
         assert_eq!(set_result[0].as_string().unwrap(), "OK");
 
         // Get the value
-        let get_message = protocol::array(vec![
-            protocol::bulk_string("GET"),
-            protocol::bulk_string("test_key"),
-        ]);
         let get_cmd = Get {
-            message: get_message,
+            message: command_message(&["GET", "test_key"]),
         };
         let get_result = get_cmd.execute(&storage).unwrap();
         assert_eq!(get_result[0].as_string().unwrap(), "test_value");
@@ -145,10 +127,7 @@ mod tests {
         drop(data);
 
         // Retrieve binary data
-        let get_message = protocol::array(vec![
-            protocol::bulk_string("GET"),
-            protocol::bulk_string("binary_key"),
-        ]);
+        let get_message = command_message(&["GET", "binary_key"]);
         let get_cmd = Get {
             message: get_message,
         };
@@ -174,10 +153,7 @@ mod tests {
 
         // Get each value
         for i in 0..5 {
-            let get_message = protocol::array(vec![
-                protocol::bulk_string("GET"),
-                protocol::bulk_string(&format!("key{}", i)),
-            ]);
+            let get_message = command_message(&["GET", &format!("key{}", i)]);
             let get_cmd = Get {
                 message: get_message,
             };

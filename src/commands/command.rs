@@ -36,10 +36,11 @@ impl RedisCommand for Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::command_message;
 
     #[test]
     fn test_command_command() {
-        let message = protocol::array(vec![protocol::bulk_string("COMMAND")]);
+        let message = command_message(&["COMMAND"]);
         let cmd = Command { message };
 
         let storage = Arc::new(std::sync::Mutex::new(Storage::new(

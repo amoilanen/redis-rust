@@ -50,18 +50,13 @@ impl RedisCommand for LPush {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{create_test_notifier, create_test_storage, read_list};
-    use crate::commands::set::Set;
+    use super::super::read_list;
+    use crate::commands::{command_message, create_test_notifier, create_test_storage, set};
 
     fn lpush_msg(key: &str, values: &[&str]) -> DataType {
-        let mut parts = vec![
-            protocol::bulk_string("LPUSH"),
-            protocol::bulk_string(key),
-        ];
-        for v in values {
-            parts.push(protocol::bulk_string(v));
-        }
-        protocol::array(parts)
+        let mut parts = vec!["LPUSH", key];
+        parts.extend_from_slice(values);
+        command_message(&parts)
     }
 
     fn lpush(message: DataType, notifier: &Arc<BlockingNotifier>) -> LPush {
@@ -125,14 +120,11 @@ mod tests {
         let notifier = create_test_notifier();
 
         // Missing both key and value
-        let msg1 = protocol::array(vec![protocol::bulk_string("LPUSH")]);
+        let msg1 = command_message(&["LPUSH"]);
         assert!(lpush(msg1, &notifier).execute(&storage).is_err());
 
         // Missing value
-        let msg2 = protocol::array(vec![
-            protocol::bulk_string("LPUSH"),
-            protocol::bulk_string("mylist"),
-        ]);
+        let msg2 = command_message(&["LPUSH", "mylist"]);
         assert!(lpush(msg2, &notifier).execute(&storage).is_err());
         Ok(())
     }
@@ -143,12 +135,7 @@ mod tests {
         let notifier = create_test_notifier();
 
         // Store a plain string value using SET
-        let set_msg = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("mykey"),
-            protocol::bulk_string("not_a_list"),
-        ]);
-        Set { message: set_msg }.execute(&storage)?;
+        set(&["SET", "mykey", "not_a_list"]).execute(&storage)?;
 
         // LPUSH to the same key should fail since it's not a list
         assert!(lpush(lpush_msg("mykey", &["value"]), &notifier).execute(&storage).is_err());

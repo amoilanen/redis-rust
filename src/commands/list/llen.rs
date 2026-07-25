@@ -57,14 +57,11 @@ impl RedisCommand for LLen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{create_test_storage, set_list_values};
-    use crate::commands::set::Set;
+    use super::super::set_list_values;
+    use crate::commands::{command_message, create_test_storage, set};
 
     fn llen(key: &str) -> LLen {
-        let msg = protocol::array(vec![
-            protocol::bulk_string("LLEN"),
-            protocol::bulk_string(key),
-        ]);
+        let msg = command_message(&["LLEN", key]);
         LLen { message: msg }
     }
 
@@ -73,8 +70,7 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["value1", "value2", "value3", "value4"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
-        set_list_values(&storage, key, &elements)?;
+        set_list_values(&storage, key, &values)?;
 
         let result = llen(key).execute(&storage)?;
         assert_eq!(result.len(), 1);
@@ -95,7 +91,7 @@ mod tests {
     fn test_llen_returns_zero_for_empty_list() -> anyhow::Result<()> {
         let storage = create_test_storage();
         let key = "mylist";
-        set_list_values(&storage, key, &Vec::new())?;
+        set_list_values(&storage, key, &[])?;
 
         let result = llen(key).execute(&storage)?;
         assert_eq!(result[0], protocol::integer(0));
@@ -107,15 +103,11 @@ mod tests {
         let storage = create_test_storage();
 
         // Missing key
-        let msg1 = protocol::array(vec![protocol::bulk_string("LLEN")]);
+        let msg1 = command_message(&["LLEN"]);
         assert!(LLen { message: msg1 }.execute(&storage).is_err());
 
         // Too many arguments
-        let msg2 = protocol::array(vec![
-            protocol::bulk_string("LLEN"),
-            protocol::bulk_string("mylist"),
-            protocol::bulk_string("extra"),
-        ]);
+        let msg2 = command_message(&["LLEN", "mylist", "extra"]);
         assert!(LLen { message: msg2 }.execute(&storage).is_err());
         Ok(())
     }
@@ -125,12 +117,7 @@ mod tests {
         let storage = create_test_storage();
 
         // Store a plain string value using SET
-        let set_msg = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("mykey"),
-            protocol::bulk_string("not_a_list"),
-        ]);
-        Set { message: set_msg }.execute(&storage)?;
+        set(&["SET", "mykey", "not_a_list"]).execute(&storage)?;
 
         // LLEN on the same key should fail since it's not a list
         assert!(llen("mykey").execute(&storage).is_err());

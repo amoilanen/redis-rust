@@ -48,8 +48,8 @@ impl RedisCommand for RPush {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{create_test_notifier, create_test_storage, read_list};
-    use crate::commands::set::Set;
+    use super::super::read_list;
+    use crate::commands::{command_message, create_test_notifier, create_test_storage, set};
 
     #[test]
     fn test_rpush_creates_and_appends() -> anyhow::Result<()> {
@@ -58,11 +58,7 @@ mod tests {
 
         let values = vec!["one", "two", "three"];
         for (i, value) in values.iter().enumerate() {
-            let msg = protocol::array(vec![
-                protocol::bulk_string("RPUSH"),
-                protocol::bulk_string("mylist"),
-                protocol::bulk_string(value),
-            ]);
+            let msg = command_message(&["RPUSH", "mylist", value]);
             let cmd = RPush { message: msg, notifier: Arc::clone(&notifier) };
             let result = cmd.execute(&storage)?;
             assert_eq!(result.len(), 1);
@@ -78,13 +74,7 @@ mod tests {
         let notifier = create_test_notifier();
 
         // Create new list with multiple elements
-        let msg1 = protocol::array(vec![
-            protocol::bulk_string("RPUSH"),
-            protocol::bulk_string("mylist"),
-            protocol::bulk_string("element1"),
-            protocol::bulk_string("element2"),
-            protocol::bulk_string("element3"),
-        ]);
+        let msg1 = command_message(&["RPUSH", "mylist", "element1", "element2", "element3"]);
         let result1 = RPush { message: msg1, notifier: Arc::clone(&notifier) }.execute(&storage)?;
         assert_eq!(result1.len(), 1);
         assert_eq!(result1[0].as_string()?, "3");
@@ -96,12 +86,7 @@ mod tests {
         );
 
         // Append more elements to existing list
-        let msg2 = protocol::array(vec![
-            protocol::bulk_string("RPUSH"),
-            protocol::bulk_string("mylist"),
-            protocol::bulk_string("element4"),
-            protocol::bulk_string("element5"),
-        ]);
+        let msg2 = command_message(&["RPUSH", "mylist", "element4", "element5"]);
         let result2 = RPush { message: msg2, notifier: Arc::clone(&notifier) }.execute(&storage)?;
         assert_eq!(result2.len(), 1);
         assert_eq!(result2[0].as_string()?, "5");
@@ -120,14 +105,11 @@ mod tests {
         let notifier = create_test_notifier();
 
         // Missing both key and value
-        let msg1 = protocol::array(vec![protocol::bulk_string("RPUSH")]);
+        let msg1 = command_message(&["RPUSH"]);
         assert!(RPush { message: msg1, notifier: Arc::clone(&notifier) }.execute(&storage).is_err());
 
         // Missing value
-        let msg2 = protocol::array(vec![
-            protocol::bulk_string("RPUSH"),
-            protocol::bulk_string("mylist"),
-        ]);
+        let msg2 = command_message(&["RPUSH", "mylist"]);
         assert!(RPush { message: msg2, notifier: Arc::clone(&notifier) }.execute(&storage).is_err());
         Ok(())
     }
@@ -138,19 +120,10 @@ mod tests {
         let notifier = create_test_notifier();
 
         // Store a plain string value using SET
-        let set_msg = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("mykey"),
-            protocol::bulk_string("not_a_list"),
-        ]);
-        Set { message: set_msg }.execute(&storage)?;
+        set(&["SET", "mykey", "not_a_list"]).execute(&storage)?;
 
         // RPUSH to the same key should fail since it's not a list
-        let rpush_msg = protocol::array(vec![
-            protocol::bulk_string("RPUSH"),
-            protocol::bulk_string("mykey"),
-            protocol::bulk_string("value"),
-        ]);
+        let rpush_msg = command_message(&["RPUSH", "mykey", "value"]);
         assert!(RPush { message: rpush_msg, notifier: Arc::clone(&notifier) }.execute(&storage).is_err());
         Ok(())
     }

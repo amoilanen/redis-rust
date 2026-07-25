@@ -93,23 +93,16 @@ impl RedisCommand for LPop {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{create_test_storage, read_list, set_list_values};
-    use crate::commands::set::Set;
+    use super::super::{read_list, set_list_values};
+    use crate::commands::{command_message, create_test_storage, set};
 
     fn lpop(key: &str) -> LPop {
-        let msg = protocol::array(vec![
-            protocol::bulk_string("LPOP"),
-            protocol::bulk_string(key),
-        ]);
+        let msg = command_message(&["LPOP", key]);
         LPop { message: msg }
     }
 
     fn lpop_n(key: &str, count: i64) -> LPop {
-        let msg = protocol::array(vec![
-            protocol::bulk_string("LPOP"),
-            protocol::bulk_string(key),
-            protocol::bulk_string(&count.to_string()),
-        ]);
+        let msg = command_message(&["LPOP", key, &count.to_string()]);
         LPop { message: msg }
     }
 
@@ -118,8 +111,7 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["one", "two", "three", "four", "five"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
-        set_list_values(&storage, key, &elements)?;
+        set_list_values(&storage, key, &values)?;
 
         let result = lpop(key).execute(&storage)?;
         assert_eq!(result.len(), 1);
@@ -146,7 +138,7 @@ mod tests {
     fn test_lpop_returns_null_for_empty_list() -> anyhow::Result<()> {
         let storage = create_test_storage();
         let key = "mylist";
-        set_list_values(&storage, key, &Vec::new())?;
+        set_list_values(&storage, key, &[])?;
 
         let result = lpop(key).execute(&storage)?;
         assert_eq!(result.len(), 1);
@@ -159,8 +151,7 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["a", "b"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
-        set_list_values(&storage, key, &elements)?;
+        set_list_values(&storage, key, &values)?;
 
         assert_eq!(lpop(key).execute(&storage)?[0], protocol::bulk_string("a"));
         assert_eq!(lpop(key).execute(&storage)?[0], protocol::bulk_string("b"));
@@ -173,32 +164,19 @@ mod tests {
         let storage = create_test_storage();
 
         // Missing key
-        let msg1 = protocol::array(vec![protocol::bulk_string("LPOP")]);
+        let msg1 = command_message(&["LPOP"]);
         assert!(LPop { message: msg1 }.execute(&storage).is_err());
 
         // Too many arguments (only one optional count is supported)
-        let msg2 = protocol::array(vec![
-            protocol::bulk_string("LPOP"),
-            protocol::bulk_string("mylist"),
-            protocol::bulk_string("2"),
-            protocol::bulk_string("extra"),
-        ]);
+        let msg2 = command_message(&["LPOP", "mylist", "2", "extra"]);
         assert!(LPop { message: msg2 }.execute(&storage).is_err());
 
         // Non-integer count
-        let msg3 = protocol::array(vec![
-            protocol::bulk_string("LPOP"),
-            protocol::bulk_string("mylist"),
-            protocol::bulk_string("notanumber"),
-        ]);
+        let msg3 = command_message(&["LPOP", "mylist", "notanumber"]);
         assert!(LPop { message: msg3 }.execute(&storage).is_err());
 
         // Negative count is rejected
-        let msg4 = protocol::array(vec![
-            protocol::bulk_string("LPOP"),
-            protocol::bulk_string("mylist"),
-            protocol::bulk_string("-1"),
-        ]);
+        let msg4 = command_message(&["LPOP", "mylist", "-1"]);
         assert!(LPop { message: msg4 }.execute(&storage).is_err());
         Ok(())
     }
@@ -208,8 +186,7 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["one", "two", "three", "four", "five"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
-        set_list_values(&storage, key, &elements)?;
+        set_list_values(&storage, key, &values)?;
 
         // LPOP key 2 -> array ["one", "two"], remainder ["three", "four", "five"]
         let result = lpop_n(key, 2).execute(&storage)?;
@@ -234,8 +211,7 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["a", "b", "c"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
-        set_list_values(&storage, key, &elements)?;
+        set_list_values(&storage, key, &values)?;
 
         // LPOP key 10 on a 3-element list returns all 3 elements, list is empty after.
         let result = lpop_n(key, 10).execute(&storage)?;
@@ -256,8 +232,7 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["a", "b"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
-        set_list_values(&storage, key, &elements)?;
+        set_list_values(&storage, key, &values)?;
 
         // LPOP key 0 removes nothing and returns an empty array.
         let result = lpop_n(key, 0).execute(&storage)?;
@@ -270,7 +245,7 @@ mod tests {
     fn test_lpop_with_count_on_empty_list_returns_empty_array() -> anyhow::Result<()> {
         let storage = create_test_storage();
         let key = "mylist";
-        set_list_values(&storage, key, &Vec::new())?;
+        set_list_values(&storage, key, &[])?;
 
         let result = lpop_n(key, 3).execute(&storage)?;
         assert_eq!(result[0], protocol::array(Vec::new()));
@@ -291,12 +266,7 @@ mod tests {
         let storage = create_test_storage();
 
         // Store a plain string value using SET
-        let set_msg = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("mykey"),
-            protocol::bulk_string("not_a_list"),
-        ]);
-        Set { message: set_msg }.execute(&storage)?;
+        set(&["SET", "mykey", "not_a_list"]).execute(&storage)?;
 
         // LPOP on the same key should fail since it's not a list
         assert!(lpop("mykey").execute(&storage).is_err());

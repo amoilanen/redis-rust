@@ -39,6 +39,7 @@ impl RedisCommand for Echo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::command_message;
     use crate::protocol;
 
     #[test]
@@ -70,7 +71,7 @@ mod tests {
 
     #[test]
     fn test_echo_command_without_message() {
-        let message = protocol::array(vec![protocol::bulk_string("ECHO")]);
+        let message = command_message(&["ECHO"]);
         let cmd = Echo {
             message,
             argument: None,

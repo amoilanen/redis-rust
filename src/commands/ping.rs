@@ -35,10 +35,11 @@ impl RedisCommand for Ping {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::command_message;
 
     #[test]
     fn test_ping_command() {
-        let message = protocol::array(vec![protocol::bulk_string("PING")]);
+        let message = command_message(&["PING"]);
         let cmd = Ping { message };
 
         let storage = Arc::new(std::sync::Mutex::new(Storage::new(

@@ -74,16 +74,13 @@ impl RedisCommand for PSync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::command_message;
     use std::collections::HashMap;
 
     #[test]
     fn test_psync_returns_fullresync() {
         let server_state = Arc::new(ServerState::new(None, 6379));
-        let message = protocol::array(vec![
-            protocol::bulk_string("PSYNC"),
-            protocol::bulk_string("?"),
-            protocol::bulk_string("-1"),
-        ]);
+        let message = command_message(&["PSYNC", "?", "-1"]);
         let cmd = PSync {
             message,
             server_state,

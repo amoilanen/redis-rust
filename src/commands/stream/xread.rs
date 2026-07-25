@@ -218,32 +218,26 @@ fn encode_streams(keys: &[String], results: &[Vec<StreamEntry>], skip_empty: boo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::create_test_storage;
+    use crate::commands::{command_message, create_test_notifier, create_test_storage};
     use crate::commands::stream::{XAdd, xadd};
     use crate::protocol;
     use std::thread;
 
-    fn notifier() -> Arc<BlockingNotifier> {
-        Arc::new(BlockingNotifier::new())
-    }
-
     fn xread_cmd(parts: &[&str]) -> XRead {
-        xread_with(parts, &notifier())
+        xread_with(parts, &create_test_notifier())
     }
 
     fn xread_with(parts: &[&str], notifier: &Arc<BlockingNotifier>) -> XRead {
-        let elements = parts.iter().map(|p| protocol::bulk_string(p)).collect();
         XRead {
-            message: protocol::array(elements),
+            message: command_message(parts),
             notifier: Arc::clone(notifier),
         }
     }
 
     /// Build an XADD that shares `notifier`, so it wakes blocked readers.
     fn xadd_with(parts: &[&str], notifier: &Arc<BlockingNotifier>) -> XAdd {
-        let elements = parts.iter().map(|p| protocol::bulk_string(p)).collect();
         XAdd {
-            message: protocol::array(elements),
+            message: command_message(parts),
             notifier: Arc::clone(notifier),
         }
     }
@@ -376,7 +370,7 @@ mod tests {
     #[test]
     fn test_xread_block_wakes_on_concurrent_xadd() -> anyhow::Result<()> {
         let storage = create_test_storage();
-        let notifier = notifier();
+        let notifier = create_test_notifier();
         xadd(&["XADD", "stream_key", "0-1", "temperature", "96"]).execute(&storage)?;
 
         let storage_for_waiter = Arc::clone(&storage);
@@ -414,7 +408,7 @@ mod tests {
     #[test]
     fn test_xread_block_dollar_wakes_on_concurrent_xadd() -> anyhow::Result<()> {
         let storage = create_test_storage();
-        let notifier = notifier();
+        let notifier = create_test_notifier();
         xadd(&["XADD", "stream_key", "0-1", "temperature", "96"]).execute(&storage)?;
 
         let storage_for_waiter = Arc::clone(&storage);
@@ -490,7 +484,7 @@ mod tests {
     #[test]
     fn test_xread_block_dollar_on_missing_stream_wakes_on_first_entry() -> anyhow::Result<()> {
         let storage = create_test_storage();
-        let notifier = notifier();
+        let notifier = create_test_notifier();
 
         let storage_for_waiter = Arc::clone(&storage);
         let notifier_for_waiter = Arc::clone(&notifier);

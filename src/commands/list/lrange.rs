@@ -69,7 +69,8 @@ impl RedisCommand for LRange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{create_test_storage, set_list_values};
+    use super::super::{list_elements, set_list_values};
+    use crate::commands::create_test_storage;
 
     fn lrange(key: &str, start_index: i64, end_index: i64) -> LRange {
         let msg = protocol::array(vec![
@@ -86,8 +87,8 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["value1", "value2", "value3", "value4", "value5"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
-        set_list_values(&storage, key, &elements)?;
+        set_list_values(&storage, key, &values)?;
+        let elements = list_elements(&values);
 
         let start_index: usize = 1;
         let end_index: usize = 3;
@@ -103,8 +104,7 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["value1", "value2", "value3", "value4", "value5"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
-        set_list_values(&storage, key, &elements)?;
+        set_list_values(&storage, key, &values)?;
 
         let start_index = values.len() + 1;
         let end_index = start_index + 1;
@@ -119,8 +119,8 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["value1", "value2", "value3", "value4", "value5"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
-        set_list_values(&storage, key, &elements)?;
+        set_list_values(&storage, key, &values)?;
+        let elements = list_elements(&values);
 
         {
             let start_index = 1;
@@ -169,8 +169,8 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["value1", "value2", "value3", "value4", "value5"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
-        set_list_values(&storage, key, &elements)?;
+        set_list_values(&storage, key, &values)?;
+        let elements = list_elements(&values);
 
         let start_index = 2;
         let end_index = values.len() + 1;
@@ -185,8 +185,7 @@ mod tests {
         let storage = create_test_storage();
         let key = "mylist";
         let values = vec!["value1", "value2", "value3", "value4", "value5"];
-        let elements: Vec<DataType> = values.iter().map(|s| protocol::bulk_string(s)).collect();
-        set_list_values(&storage, key, &elements)?;
+        set_list_values(&storage, key, &values)?;
 
         let start_index = 3;
         let end_index = 2;
@@ -200,7 +199,7 @@ mod tests {
     fn test_lrange_empty_list() -> anyhow::Result<()> {
         let storage = create_test_storage();
         let key = "mylist";
-        set_list_values(&storage, key, &Vec::new())?;
+        set_list_values(&storage, key, &[])?;
 
         let start_index = 1;
         let end_index = 2;

@@ -59,16 +59,13 @@ impl RedisCommand for ReplConf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::command_message;
     use std::collections::HashMap;
 
     #[test]
     fn test_replconf_listening_port() {
         let server_state = Arc::new(ServerState::new(None, 6380));
-        let message = protocol::array(vec![
-            protocol::bulk_string("REPLCONF"),
-            protocol::bulk_string("listening-port"),
-            protocol::bulk_string("6380"),
-        ]);
+        let message = command_message(&["REPLCONF", "listening-port", "6380"]);
         let cmd = ReplConf {
             message,
             server_state,
@@ -85,11 +82,7 @@ mod tests {
     #[test]
     fn test_replconf_getack() {
         let server_state = Arc::new(ServerState::new(None, 6379));
-        let message = protocol::array(vec![
-            protocol::bulk_string("REPLCONF"),
-            protocol::bulk_string("getack"),
-            protocol::bulk_string("*"),
-        ]);
+        let message = command_message(&["REPLCONF", "getack", "*"]);
         let cmd = ReplConf {
             message,
             server_state,

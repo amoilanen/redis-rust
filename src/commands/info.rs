@@ -74,15 +74,13 @@ impl RedisCommand for Info {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::command_message;
     use std::collections::HashMap;
 
     #[test]
     fn test_info_replication_master() {
         let server_state = Arc::new(ServerState::new(None, 6379));
-        let message = protocol::array(vec![
-            protocol::bulk_string("INFO"),
-            protocol::bulk_string("replication"),
-        ]);
+        let message = command_message(&["INFO", "replication"]);
         let cmd = Info {
             message,
             server_state,
@@ -100,10 +98,7 @@ mod tests {
     #[test]
     fn test_info_replication_slave() {
         let server_state = Arc::new(ServerState::new(Some("localhost 6379".to_owned()), 6380));
-        let message = protocol::array(vec![
-            protocol::bulk_string("INFO"),
-            protocol::bulk_string("replication"),
-        ]);
+        let message = command_message(&["INFO", "replication"]);
         let cmd = Info {
             message,
             server_state,

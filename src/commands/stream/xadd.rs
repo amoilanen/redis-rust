@@ -70,7 +70,7 @@ impl RedisCommand for XAdd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::create_test_storage;
+    use crate::commands::{create_test_storage, set};
     use crate::commands::stream::xadd;
 
     #[test]
@@ -134,15 +134,9 @@ mod tests {
 
     #[test]
     fn test_xadd_on_existing_string_key_fails() -> anyhow::Result<()> {
-        use crate::commands::set::Set;
-        let storage = create_test_storage();
+            let storage = create_test_storage();
 
-        let set_msg = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("mykey"),
-            protocol::bulk_string("not_a_stream"),
-        ]);
-        Set { message: set_msg }.execute(&storage)?;
+        set(&["SET", "mykey", "not_a_stream"]).execute(&storage)?;
 
         assert!(xadd(&["XADD", "mykey", "0-1", "foo", "bar"]).execute(&storage).is_err());
         assert!(!storage.lock().unwrap().contains_stream("mykey"));

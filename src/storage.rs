@@ -2,6 +2,7 @@ use anyhow::Error;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::Cursor;
+use crate::error::RedisError;
 use crate::rdb;
 use crate::stream::{Stream, StreamEntry, StreamId};
 
@@ -207,6 +208,41 @@ impl Storage {
             _ => None,
         };
         Ok(value)
+    }
+
+    /// Increments the integer held at `key` by one and returns the new value.
+    ///
+    /// The value is rewritten in place so the key keeps its original expiry,
+    /// matching Redis, where INCR never touches the TTL.
+    ///
+    /// Only keys that already hold a numeric string are supported: missing keys
+    /// and non-numeric values are handled in later stages.
+    pub fn incr(&mut self, key: &str) -> Result<i64, anyhow::Error> {
+        let stored_value = match self.data.get_mut(key) {
+            Some(stored_value) if !stored_value.is_expired() => stored_value,
+            _ => return Err(RedisError::new("ERR INCR on a missing key is not supported yet").into()),
+        };
+
+        let Value::Bytes(bytes) = &stored_value.value else {
+            return Err(RedisError::new(
+                "WRONGTYPE Operation against a key holding the wrong kind of value",
+            )
+            .into());
+        };
+
+        let current: i64 = std::str::from_utf8(bytes)
+            .ok()
+            .and_then(|text| text.parse().ok())
+            .ok_or_else(|| {
+                RedisError::new("ERR INCR of a non-numeric value is not supported yet")
+            })?;
+
+        let incremented = current
+            .checked_add(1)
+            .ok_or_else(|| RedisError::new("ERR increment or decrement would overflow"))?;
+
+        stored_value.value = Value::Bytes(incremented.to_string().into_bytes());
+        Ok(incremented)
     }
 }
 

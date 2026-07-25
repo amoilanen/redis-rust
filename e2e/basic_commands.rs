@@ -225,6 +225,34 @@ fn test_set_without_expiry_persists() -> Result<()> {
     Ok(())
 }
 
+// ========================= INCR =========================
+
+#[test]
+fn test_incr_on_existing_numeric_key() -> Result<()> {
+    // Wire-level behaviour: INCR must reply with a RESP integer (`:42\r\n`),
+    // which the test client surfaces as the bare number.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "OK");
+    assert_eq!(client.send_command(&["INCR", "foo"])?, "42");
+    Ok(())
+}
+
+#[test]
+fn test_incr_repeated_and_visible_to_get() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    client.send_command(&["SET", "counter", "5"])?;
+    assert_eq!(client.send_command(&["INCR", "counter"])?, "6");
+    assert_eq!(client.send_command(&["INCR", "counter"])?, "7");
+    assert_eq!(client.send_command(&["GET", "counter"])?, "7");
+    Ok(())
+}
+
 // ========================= INFO =========================
 
 #[test]

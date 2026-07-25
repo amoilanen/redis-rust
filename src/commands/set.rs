@@ -72,17 +72,13 @@ impl RedisCommand for Set {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::{command_message, create_test_storage};
     use std::thread;
     use std::time::Duration;
-    use crate::commands::create_test_storage;
 
     #[test]
     fn test_set_command_basic() -> Result<(), Box<dyn std::error::Error>> {
-        let message = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("key1"),
-            protocol::bulk_string("value1"),
-        ]);
+        let message = command_message(&["SET", "key1", "value1"]);
         let cmd = Set { message };
 
         let storage = create_test_storage();
@@ -101,13 +97,7 @@ mod tests {
 
     #[test]
     fn test_set_command_with_expiration() -> Result<(), Box<dyn std::error::Error>> {
-        let message = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("expiring_key"),
-            protocol::bulk_string("expiring_value"),
-            protocol::bulk_string("px"),
-            protocol::bulk_string("100"),
-        ]);
+        let message = command_message(&["SET", "expiring_key", "expiring_value", "px", "100"]);
         let cmd = Set { message };
 
         let storage = create_test_storage();
@@ -133,10 +123,7 @@ mod tests {
 
     #[test]
     fn test_set_command_invalid_syntax() -> Result<(), Box<dyn std::error::Error>> {
-        let message = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("key_only"),
-        ]);
+        let message = command_message(&["SET", "key_only"]);
         let cmd = Set { message };
 
         let storage = create_test_storage();

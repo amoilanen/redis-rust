@@ -66,28 +66,18 @@ impl RedisCommand for Type {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::create_test_storage;
-    use crate::commands::set::Set;
+    use crate::commands::{command_message, create_test_storage, set};
     use crate::commands::list::RPush;
     use crate::blocking::BlockingNotifier;
 
     fn type_cmd(key: &str) -> Type {
-        let msg = protocol::array(vec![
-            protocol::bulk_string("TYPE"),
-            protocol::bulk_string(key),
-        ]);
-        Type { message: msg }
+        Type { message: command_message(&["TYPE", key]) }
     }
 
     #[test]
     fn test_type_of_string_value() -> anyhow::Result<()> {
         let storage = create_test_storage();
-        let set_msg = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("some_key"),
-            protocol::bulk_string("foo"),
-        ]);
-        Set { message: set_msg }.execute(&storage)?;
+        set(&["SET", "some_key", "foo"]).execute(&storage)?;
 
         let result = type_cmd("some_key").execute(&storage)?;
         assert_eq!(result.len(), 1);
@@ -107,12 +97,7 @@ mod tests {
     #[test]
     fn test_type_of_list_value() -> anyhow::Result<()> {
         let storage = create_test_storage();
-        let push_msg = protocol::array(vec![
-            protocol::bulk_string("RPUSH"),
-            protocol::bulk_string("mylist"),
-            protocol::bulk_string("a"),
-            protocol::bulk_string("b"),
-        ]);
+        let push_msg = command_message(&["RPUSH", "mylist", "a", "b"]);
         RPush {
             message: push_msg,
             notifier: Arc::new(BlockingNotifier::new()),
@@ -127,13 +112,7 @@ mod tests {
     #[test]
     fn test_type_of_stream_value() -> anyhow::Result<()> {
         let storage = create_test_storage();
-        let xadd_msg = protocol::array(vec![
-            protocol::bulk_string("XADD"),
-            protocol::bulk_string("stream_key"),
-            protocol::bulk_string("0-1"),
-            protocol::bulk_string("foo"),
-            protocol::bulk_string("bar"),
-        ]);
+        let xadd_msg = command_message(&["XADD", "stream_key", "0-1", "foo", "bar"]);
         crate::commands::stream::XAdd {
             message: xadd_msg,
             notifier: std::sync::Arc::new(crate::blocking::BlockingNotifier::new()),
@@ -148,24 +127,13 @@ mod tests {
     #[test]
     fn test_type_after_overwriting_stream_with_string() -> anyhow::Result<()> {
         let storage = create_test_storage();
-        let xadd_msg = protocol::array(vec![
-            protocol::bulk_string("XADD"),
-            protocol::bulk_string("k"),
-            protocol::bulk_string("0-1"),
-            protocol::bulk_string("foo"),
-            protocol::bulk_string("bar"),
-        ]);
+        let xadd_msg = command_message(&["XADD", "k", "0-1", "foo", "bar"]);
         crate::commands::stream::XAdd {
             message: xadd_msg,
             notifier: std::sync::Arc::new(crate::blocking::BlockingNotifier::new()),
         }
         .execute(&storage)?;
-        let set_msg = protocol::array(vec![
-            protocol::bulk_string("SET"),
-            protocol::bulk_string("k"),
-            protocol::bulk_string("now_a_string"),
-        ]);
-        Set { message: set_msg }.execute(&storage)?;
+        set(&["SET", "k", "now_a_string"]).execute(&storage)?;
         assert_eq!(type_cmd("k").execute(&storage)?[0], protocol::simple_string("string"));
         Ok(())
     }
@@ -174,14 +142,10 @@ mod tests {
     fn test_type_invalid_syntax() {
         let storage = create_test_storage();
 
-        let msg1 = protocol::array(vec![protocol::bulk_string("TYPE")]);
-        assert!(Type { message: msg1 }.execute(&storage).is_err());
+        let no_key = Type { message: command_message(&["TYPE"]) };
+        assert!(no_key.execute(&storage).is_err());
 
-        let msg2 = protocol::array(vec![
-            protocol::bulk_string("TYPE"),
-            protocol::bulk_string("key"),
-            protocol::bulk_string("extra"),
-        ]);
-        assert!(Type { message: msg2 }.execute(&storage).is_err());
+        let extra_argument = Type { message: command_message(&["TYPE", "key", "extra"]) };
+        assert!(extra_argument.execute(&storage).is_err());
     }
 }

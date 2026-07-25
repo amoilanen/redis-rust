@@ -105,19 +105,15 @@ impl RedisCommand for BLPop {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{create_test_notifier, create_test_storage, set_list_values};
+    use super::super::set_list_values;
+    use crate::commands::{command_message, create_test_notifier, create_test_storage, set};
     use crate::commands::list::RPush;
-    use crate::commands::set::Set;
     use std::thread;
     use std::time::Duration;
 
     fn blpop(key: &str, timeout: &str, notifier: &Arc<BlockingNotifier>) -> BLPop {
         BLPop {
-            message: protocol::array(vec![
-                protocol::bulk_string("BLPOP"),
-                protocol::bulk_string(key),
-                protocol::bulk_string(timeout),
-            ]),
+            message: command_message(&["BLPOP", key, timeout]),
             notifier: Arc::clone(notifier),
         }
     }
@@ -128,11 +124,7 @@ mod tests {
         let notifier = create_test_notifier();
         let key = "list_key";
 
-        set_list_values(
-            &storage,
-            key,
-            &[protocol::bulk_string("foo"), protocol::bulk_string("bar")],
-        )?;
+        set_list_values(&storage, key, &["foo", "bar"])?;
 
         let result = blpop(key, "0", &notifier).execute(&storage)?;
         assert_eq!(
@@ -165,11 +157,7 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         let push_result = RPush {
-            message: protocol::array(vec![
-                protocol::bulk_string("RPUSH"),
-                protocol::bulk_string(key),
-                protocol::bulk_string("foo"),
-            ]),
+            message: command_message(&["RPUSH", key, "foo"]),
             notifier: Arc::clone(&notifier),
         }
         .execute(&storage)?;
@@ -205,11 +193,7 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         RPush {
-            message: protocol::array(vec![
-                protocol::bulk_string("RPUSH"),
-                protocol::bulk_string(key),
-                protocol::bulk_string("foo"),
-            ]),
+            message: command_message(&["RPUSH", key, "foo"]),
             notifier: Arc::clone(&notifier),
         }
         .execute(&storage)?;
@@ -224,11 +208,7 @@ mod tests {
         );
 
         RPush {
-            message: protocol::array(vec![
-                protocol::bulk_string("RPUSH"),
-                protocol::bulk_string(key),
-                protocol::bulk_string("bar"),
-            ]),
+            message: command_message(&["RPUSH", key, "bar"]),
             notifier: Arc::clone(&notifier),
         }
         .execute(&storage)?;
@@ -273,11 +253,7 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         RPush {
-            message: protocol::array(vec![
-                protocol::bulk_string("RPUSH"),
-                protocol::bulk_string(key),
-                protocol::bulk_string("foo"),
-            ]),
+            message: command_message(&["RPUSH", key, "foo"]),
             notifier: Arc::clone(&notifier),
         }
         .execute(&storage)?;
@@ -298,10 +274,7 @@ mod tests {
         let storage = create_test_storage();
         let notifier = create_test_notifier();
 
-        let msg = protocol::array(vec![
-            protocol::bulk_string("BLPOP"),
-            protocol::bulk_string("k"),
-        ]);
+        let msg = command_message(&["BLPOP", "k"]);
         assert!(BLPop { message: msg, notifier: Arc::clone(&notifier) }
             .execute(&storage)
             .is_err());
@@ -315,14 +288,7 @@ mod tests {
         let storage = create_test_storage();
         let notifier = create_test_notifier();
 
-        Set {
-            message: protocol::array(vec![
-                protocol::bulk_string("SET"),
-                protocol::bulk_string("k"),
-                protocol::bulk_string("not_a_list"),
-            ]),
-        }
-        .execute(&storage)?;
+        set(&["SET", "k", "not_a_list"]).execute(&storage)?;
 
         assert!(blpop("k", "0", &notifier).execute(&storage).is_err());
         Ok(())

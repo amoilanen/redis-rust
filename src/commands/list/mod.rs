@@ -143,19 +143,19 @@ where
 // Gated with `#[cfg(test)]` so they are stripped from release builds entirely.
 // ---------------------------------------------------------------------------
 
-/// Build a fresh, empty `Storage` wrapped in an `Arc<Mutex<...>>` for unit tests.
+// `create_test_storage`, `create_test_notifier` and `command_message` live in
+// `crate::commands` - they are not list-specific. Only the list-shaped fixtures
+// below belong here.
+
+/// The RESP elements that a list of plain string `values` maps to - the shared
+/// building block for both seeding a list and asserting on a reply that echoes
+/// one back.
 #[cfg(test)]
-fn create_test_storage() -> Arc<Mutex<Storage>> {
-    use std::collections::HashMap;
-    Arc::new(Mutex::new(Storage::new(HashMap::new())))
+fn list_elements(values: &[&str]) -> Vec<DataType> {
+    values.iter().map(|v| protocol::bulk_string(v)).collect()
 }
 
-#[cfg(test)]
-fn create_test_notifier() -> Arc<BlockingNotifier> {
-    Arc::new(BlockingNotifier::new())
-}
-
-/// Seed `storage` with a list at `key` containing the given `elements`.
+/// Seed `storage` with a list at `key` containing the given `values`.
 ///
 /// Writes the values as a RESP-serialized Array so that `get_list_elements`
 /// and the public command implementations can read it back.
@@ -163,12 +163,12 @@ fn create_test_notifier() -> Arc<BlockingNotifier> {
 fn set_list_values(
     storage: &Arc<Mutex<Storage>>,
     key: &str,
-    elements: &[DataType],
+    values: &[&str],
 ) -> Result<()> {
     storage
         .lock()
         .map_err(|e| anyhow!("Failed to lock storage: {}", e))?
-        .set(key, protocol::array(elements.to_vec()).serialize(), None)?;
+        .set(key, protocol::array(list_elements(values)).serialize(), None)?;
     Ok(())
 }
 
