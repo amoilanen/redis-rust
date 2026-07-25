@@ -73,11 +73,9 @@ impl RedisCommand for XRead {
         let (keys, ids) = args.split_at(args.len() / 2);
         let keys = keys.to_vec();
 
-        // Resolve each exclusive lower-bound ID once up front.
-        let afters = ids
-            .iter()
-            .map(|id| StreamId::parse_range(id, 0))
-            .collect::<Result<Vec<StreamId>, RedisError>>()?;
+        // Resolve each exclusive lower-bound ID once up front, before any read,
+        // so that `$` means "entries added after this command was issued".
+        let afters = resolve_afters(storage, &keys, ids)?;
 
         // Non-blocking XREAD echoes every requested stream, including those with
         // no new entries (as an empty array).
@@ -138,6 +136,39 @@ impl RedisCommand for XRead {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+}
+
+/// Resolves the requested IDs into exclusive lower bounds, one per key.
+///
+/// `$` stands for the stream's current last ID, so the read only yields entries
+/// added afterwards; an unknown or empty stream resolves to `0-0`. All `$`s are
+/// resolved under a single storage lock, giving every stream in the request the
+/// same point-in-time snapshot.
+fn resolve_afters(
+    storage: &Arc<Mutex<Storage>>,
+    keys: &[String],
+    ids: &[String],
+) -> Result<Vec<StreamId>, anyhow::Error> {
+    if !ids.iter().any(|id| id == "$") {
+        return Ok(ids
+            .iter()
+            .map(|id| StreamId::parse_range(id, 0))
+            .collect::<Result<Vec<StreamId>, RedisError>>()?);
+    }
+
+    let guard = storage
+        .lock()
+        .map_err(|e| anyhow!("Failed to lock storage: {}", e))?;
+    keys.iter()
+        .zip(ids)
+        .map(|(key, id)| {
+            if id == "$" {
+                Ok(guard.stream_last_id(key).unwrap_or(StreamId::ZERO))
+            } else {
+                Ok(StreamId::parse_range(id, 0)?)
+            }
+        })
+        .collect()
 }
 
 /// Locks storage and reads every requested stream after its lower-bound ID.
@@ -376,6 +407,104 @@ mod tests {
                 ]),
             ])]),
         ])]);
+        assert_eq!(result, vec![expected]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_xread_block_dollar_wakes_on_concurrent_xadd() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let notifier = notifier();
+        xadd(&["XADD", "stream_key", "0-1", "temperature", "96"]).execute(&storage)?;
+
+        let storage_for_waiter = Arc::clone(&storage);
+        let notifier_for_waiter = Arc::clone(&notifier);
+        // `$` resolves to 0-1, the last ID at the time the command is issued.
+        let waiter = thread::spawn(move || {
+            xread_with(
+                &["XREAD", "BLOCK", "0", "STREAMS", "stream_key", "$"],
+                &notifier_for_waiter,
+            )
+            .execute(&storage_for_waiter)
+            .expect("XREAD failed")
+        });
+
+        // Give the reader time to park before appending the entry that wakes it.
+        thread::sleep(Duration::from_millis(100));
+        xadd_with(&["XADD", "stream_key", "0-2", "temperature", "95"], &notifier)
+            .execute(&storage)?;
+
+        // Only the entry added after the command was issued comes back — not 0-1.
+        let result = waiter.join().expect("waiter panicked");
+        let expected = protocol::array(vec![protocol::array(vec![
+            protocol::bulk_string("stream_key"),
+            protocol::array(vec![protocol::array(vec![
+                protocol::bulk_string("0-2"),
+                protocol::array(vec![
+                    protocol::bulk_string("temperature"),
+                    protocol::bulk_string("95"),
+                ]),
+            ])]),
+        ])]);
+        assert_eq!(result, vec![expected]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_xread_block_dollar_times_out_to_null_array() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        xadd(&["XADD", "stream_key", "0-1", "temperature", "96"]).execute(&storage)?;
+
+        // Nothing is added after the command, so the existing 0-1 must not match.
+        let result =
+            xread_cmd(&["XREAD", "BLOCK", "50", "STREAMS", "stream_key", "$"]).execute(&storage)?;
+        assert_eq!(result, vec![protocol::null_array()]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_xread_dollar_on_missing_stream_reads_from_zero() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+
+        // An unknown stream has no last ID, so `$` falls back to 0-0.
+        let result = xread_cmd(&["XREAD", "STREAMS", "missing", "$"]).execute(&storage)?;
+
+        let expected = protocol::array(vec![protocol::array(vec![
+            protocol::bulk_string("missing"),
+            protocol::array(vec![]),
+        ])]);
+        assert_eq!(result, vec![expected]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_xread_dollar_mixed_with_explicit_ids() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        xadd(&["XADD", "stream_key", "0-1", "temperature", "95"]).execute(&storage)?;
+        xadd(&["XADD", "other_stream_key", "0-1", "humidity", "97"]).execute(&storage)?;
+
+        // `$` skips everything in other_stream_key; 0-0 still yields stream_key's entry.
+        let result = xread_cmd(&[
+            "XREAD", "STREAMS", "stream_key", "other_stream_key", "0-0", "$",
+        ])
+        .execute(&storage)?;
+
+        let expected = protocol::array(vec![
+            protocol::array(vec![
+                protocol::bulk_string("stream_key"),
+                protocol::array(vec![protocol::array(vec![
+                    protocol::bulk_string("0-1"),
+                    protocol::array(vec![
+                        protocol::bulk_string("temperature"),
+                        protocol::bulk_string("95"),
+                    ]),
+                ])]),
+            ]),
+            protocol::array(vec![
+                protocol::bulk_string("other_stream_key"),
+                protocol::array(vec![]),
+            ]),
+        ]);
         assert_eq!(result, vec![expected]);
         Ok(())
     }

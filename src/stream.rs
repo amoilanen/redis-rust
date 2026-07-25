@@ -144,7 +144,8 @@ impl Stream {
         }
     }
 
-    fn last_id(&self) -> Option<StreamId> {
+    /// The ID of the most recently added entry, or `None` for an empty stream.
+    pub fn last_id(&self) -> Option<StreamId> {
         self.last_id_filtered_by_time_part(None)
     }
 

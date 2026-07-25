@@ -152,6 +152,12 @@ impl Storage {
             .unwrap_or_default()
     }
 
+    /// The last ID of the stream at `key`, or `None` when the key holds no
+    /// stream or the stream is empty. Used to resolve `$` in XREAD.
+    pub fn stream_last_id(&self, key: &str) -> Option<StreamId> {
+        self.get_stream(key).and_then(|stream| stream.last_id())
+    }
+
     pub fn xread(&self, key: &str, after: StreamId) -> Vec<StreamEntry> {
         self.get_stream(key)
             .map(|stream| stream.read(after))
