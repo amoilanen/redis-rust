@@ -3,8 +3,8 @@
 /// Syntax: INCR <key>
 /// Returns: the value after the increment, as a RESP integer (`:N\r\n`)
 ///
-/// Only keys that already hold a numeric string are supported so far; creating
-/// a missing key and rejecting non-numeric values come in later stages.
+/// A missing key is created holding `1`. Rejecting non-numeric values with the
+/// Redis-accurate error comes in a later stage.
 
 use std::sync::{Arc, Mutex};
 use log::*;
@@ -64,6 +64,16 @@ mod tests {
 
     fn incr(key: &str) -> Incr {
         Incr { message: command_message(&["INCR", key]) }
+    }
+
+    /// The message `error` sends back to the client, i.e. the text of the
+    /// `-...\r\n` simple error. Panics if it is an internal error instead,
+    /// since those close the connection rather than reaching the client.
+    fn client_error_message(error: anyhow::Error) -> String {
+        error
+            .downcast::<RedisError>()
+            .expect("failure should be a client-facing RedisError")
+            .message
     }
 
     /// Absolute expiry deadline (ms since epoch) currently recorded for `key`,
@@ -153,28 +163,116 @@ mod tests {
     }
 
     #[test]
-    fn test_incr_of_expired_key_does_not_resurrect_it() -> anyhow::Result<()> {
-        // An expired key is logically absent, so it must not be incremented in
-        // place - creating it fresh is the (not yet implemented) missing-key path.
+    fn test_incr_of_missing_key_creates_it_at_one() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+
+        assert_eq!(incr("missing").execute(&storage)?, vec![protocol::integer(1)]);
+
+        // The counter is a real string value afterwards, so GET sees it and a
+        // second INCR continues from there.
+        assert_eq!(storage.lock().unwrap().get("missing")?, Some(b"1".to_vec()));
+        assert_eq!(incr("missing").execute(&storage)?, vec![protocol::integer(2)]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_incr_of_missing_key_creates_it_without_an_expiry() -> anyhow::Result<()> {
+        // A created counter must be persistent: no expiry may be inherited from
+        // anywhere, so it is still readable long after any plausible TTL.
+        let storage = create_test_storage();
+
+        assert_eq!(incr("fresh").execute(&storage)?, vec![protocol::integer(1)]);
+
+        assert_eq!(expires_at_ms(&storage, "fresh"), None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_incr_of_expired_key_starts_a_new_counter() -> anyhow::Result<()> {
+        // An expired key is logically absent, so INCR must not resume from its
+        // stale value - it starts at 1, and the dead key's TTL dies with it.
         let storage = create_test_storage();
         set(&["SET", "gone", "41", "px", "10"]).execute(&storage)?;
         thread::sleep(Duration::from_millis(30));
 
-        let result = incr("gone").execute(&storage);
+        assert_eq!(incr("gone").execute(&storage)?, vec![protocol::integer(1)]);
 
-        assert!(result.unwrap_err().downcast::<RedisError>().is_ok());
-        assert_eq!(storage.lock().unwrap().get("gone")?, None);
+        assert_eq!(storage.lock().unwrap().get("gone")?, Some(b"1".to_vec()));
+        assert_eq!(expires_at_ms(&storage, "gone"), None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_incr_rejects_every_shape_of_non_integer() -> anyhow::Result<()> {
+        // Everything Redis refuses to read as a base-10 i64 gets the same reply:
+        // words, the empty string, decimals, padded digits and values that
+        // overflow an i64 on the way in.
+        let storage = create_test_storage();
+        let not_integers = [
+            "hello",
+            "",
+            "3.14",
+            " 42",
+            "42 ",
+            "1e3",
+            "9223372036854775808", // i64::MAX + 1
+        ];
+
+        for value in not_integers {
+            let key = format!("key_for_{:?}", value);
+            set(&["SET", &key, value]).execute(&storage)?;
+
+            let error = incr(&key).execute(&storage).unwrap_err();
+
+            assert_eq!(
+                client_error_message(error),
+                "ERR value is not an integer or out of range",
+                "value {:?} should be rejected as a non-integer",
+                value
+            );
+            assert_eq!(
+                storage.lock().unwrap().get(&key)?,
+                Some(value.as_bytes().to_vec()),
+                "value {:?} should be left untouched",
+                value
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_incr_of_a_stream_is_a_wrongtype_error() -> anyhow::Result<()> {
+        // A stream is the wrong kind of value, not an unreadable number, so it
+        // must not be reported as "value is not an integer".
+        let storage = create_test_storage();
+        crate::commands::stream::XAdd {
+            message: command_message(&["XADD", "events", "0-1", "foo", "bar"]),
+            notifier: crate::commands::create_test_notifier(),
+        }
+        .execute(&storage)?;
+
+        let error = incr("events").execute(&storage).unwrap_err();
+
+        assert_eq!(
+            client_error_message(error),
+            "WRONGTYPE Operation against a key holding the wrong kind of value"
+        );
         Ok(())
     }
 
     #[test]
     fn test_incr_overflow_is_client_error() -> anyhow::Result<()> {
+        // i64::MAX parses fine; it is the increment itself that cannot be
+        // represented, which Redis reports differently from a bad value.
         let storage = create_test_storage();
         set(&["SET", "big", &i64::MAX.to_string()]).execute(&storage)?;
 
-        let result = incr("big").execute(&storage);
+        let error = incr("big").execute(&storage).unwrap_err();
 
-        assert!(result.unwrap_err().downcast::<RedisError>().is_ok());
+        assert_eq!(
+            client_error_message(error),
+            "ERR increment or decrement would overflow"
+        );
         // The value is left untouched by the rejected increment.
         assert_eq!(
             storage.lock().unwrap().get("big")?,

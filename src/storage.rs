@@ -212,16 +212,33 @@ impl Storage {
 
     /// Increments the integer held at `key` by one and returns the new value.
     ///
-    /// The value is rewritten in place so the key keeps its original expiry,
-    /// matching Redis, where INCR never touches the TTL.
+    /// An existing value is rewritten in place so the key keeps its original
+    /// expiry, matching Redis, where INCR never touches the TTL. A key that is
+    /// absent (or already expired, which is the same thing to a client) is
+    /// created holding `1`, with no expiry.
     ///
-    /// Only keys that already hold a numeric string are supported: missing keys
-    /// and non-numeric values are handled in later stages.
+    /// A value that isn't a base-10 integer - or is one that no longer fits in
+    /// an `i64` - is rejected with `ERR value is not an integer or out of
+    /// range`, leaving the stored value untouched.
     pub fn incr(&mut self, key: &str) -> Result<i64, anyhow::Error> {
-        let stored_value = match self.data.get_mut(key) {
-            Some(stored_value) if !stored_value.is_expired() => stored_value,
-            _ => return Err(RedisError::new("ERR INCR on a missing key is not supported yet").into()),
-        };
+        // Checked before taking the mutable borrow below so the missing-key
+        // branch is free to insert through `self`.
+        let is_live = self
+            .data
+            .get(key)
+            .is_some_and(|stored_value| !stored_value.is_expired());
+
+        if !is_live {
+            // Absent or expired: the counter starts fresh at 1, and any expiry
+            // left over from the dead value is dropped along with it.
+            self.set(key, b"1".to_vec(), None)?;
+            return Ok(1);
+        }
+
+        let stored_value = self
+            .data
+            .get_mut(key)
+            .expect("key was just observed to be live");
 
         let Value::Bytes(bytes) = &stored_value.value else {
             return Err(RedisError::new(
@@ -230,12 +247,12 @@ impl Storage {
             .into());
         };
 
+        // Non-UTF8 bytes, text that isn't a number, and numbers too large for an
+        // i64 all fail here; Redis reports every one of them the same way.
         let current: i64 = std::str::from_utf8(bytes)
             .ok()
             .and_then(|text| text.parse().ok())
-            .ok_or_else(|| {
-                RedisError::new("ERR INCR of a non-numeric value is not supported yet")
-            })?;
+            .ok_or_else(|| RedisError::new("ERR value is not an integer or out of range"))?;
 
         let incremented = current
             .checked_add(1)

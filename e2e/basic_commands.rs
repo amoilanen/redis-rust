@@ -253,6 +253,39 @@ fn test_incr_repeated_and_visible_to_get() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_incr_on_missing_key_starts_at_one() -> Result<()> {
+    // Each never-before-seen key gets its own counter starting at 1, and the
+    // created value is a normal string that GET can read back.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["INCR", "foo"])?, "1");
+    assert_eq!(client.send_command(&["INCR", "bar"])?, "1");
+    assert_eq!(client.send_command(&["INCR", "foo"])?, "2");
+    assert_eq!(client.send_command(&["GET", "foo"])?, "2");
+    Ok(())
+}
+
+#[test]
+fn test_incr_on_non_numeric_value_errors() -> Result<()> {
+    // Wire-level behaviour: the client gets `-ERR value is not an integer or
+    // out of range\r\n`, the value survives, and the connection stays usable.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["SET", "foo", "bar"])?, "OK");
+
+    let err = client.send_command(&["INCR", "foo"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR value is not an integer or out of range");
+
+    assert_eq!(client.send_command(&["GET", "foo"])?, "bar");
+    assert_eq!(client.send_command(&["INCR", "other"])?, "1");
+    Ok(())
+}
+
 // ========================= INFO =========================
 
 #[test]
