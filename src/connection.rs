@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use crate::protocol::{self, DataType};
 use crate::error::RedisError;
 use crate::io;
-use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Incr, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
+use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Incr, Multi, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
 use crate::storage::Storage;
 use crate::server_state::ServerState;
 
@@ -131,6 +131,7 @@ fn build_command(
         "SET"      => Box::new(Set { message }),
         "GET"      => Box::new(Get { message }),
         "INCR"     => Box::new(Incr { message }),
+        "MULTI"    => Box::new(Multi { message }),
         "COMMAND"  => Box::new(Command { message }),
         "INFO"     => Box::new(Info { message, server_state: state() }),
         "REPLCONF" => Box::new(ReplConf { message, server_state: state() }),

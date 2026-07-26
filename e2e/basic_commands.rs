@@ -286,6 +286,48 @@ fn test_incr_on_non_numeric_value_errors() -> Result<()> {
     Ok(())
 }
 
+// ========================= MULTI =========================
+
+#[test]
+fn test_multi_replies_ok() -> Result<()> {
+    // Wire-level behaviour: `MULTI` is acknowledged with `+OK\r\n`.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+    Ok(())
+}
+
+#[test]
+fn test_commands_after_multi_still_execute_for_now() -> Result<()> {
+    // Queueing is a later stage: for now MULTI does not change how the
+    // following commands behave, so they run and reply normally.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "OK");
+    assert_eq!(client.send_command(&["INCR", "foo"])?, "42");
+    Ok(())
+}
+
+#[test]
+fn test_multi_is_per_connection_and_repeatable() -> Result<()> {
+    // Two clients each get their own `+OK`, and a second MULTI on the same
+    // connection is answered too - nothing here is global server state.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client_a = server.client();
+    let mut client_b = server.client();
+
+    assert_eq!(client_a.send_command(&["MULTI"])?, "OK");
+    assert_eq!(client_b.send_command(&["MULTI"])?, "OK");
+    assert_eq!(client_a.send_command(&["MULTI"])?, "OK");
+    Ok(())
+}
+
 // ========================= INFO =========================
 
 #[test]
