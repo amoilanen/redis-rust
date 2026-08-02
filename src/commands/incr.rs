@@ -60,20 +60,10 @@ mod tests {
     use super::*;
     use std::thread;
     use std::time::Duration;
-    use crate::commands::{command_message, create_test_storage, set};
+    use crate::commands::{client_error_message, command_message, create_test_storage, set};
 
     fn incr(key: &str) -> Incr {
         Incr { message: command_message(&["INCR", key]) }
-    }
-
-    /// The message `error` sends back to the client, i.e. the text of the
-    /// `-...\r\n` simple error. Panics if it is an internal error instead,
-    /// since those close the connection rather than reaching the client.
-    fn client_error_message(error: anyhow::Error) -> String {
-        error
-            .downcast::<RedisError>()
-            .expect("failure should be a client-facing RedisError")
-            .message
     }
 
     /// Absolute expiry deadline (ms since epoch) currently recorded for `key`,

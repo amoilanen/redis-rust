@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 use crate::protocol::{self, DataType};
 use crate::error::RedisError;
 use crate::io;
-use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Incr, Multi, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
+use crate::commands::{self, RedisCommand, Echo, Ping, Set, Get, Incr, Multi, Exec, Command, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
+use crate::commands::transaction::TransactionSlot;
 use crate::storage::Storage;
 use crate::server_state::ServerState;
 
@@ -40,6 +41,11 @@ pub fn handle_connection(
     should_reply: bool,
 ) -> Result<(), anyhow::Error> {
     debug!("accepted new connection");
+
+    // Per-connection, not on `ServerState`: a disconnect discards any open
+    // transaction, as Redis does.
+    let transaction = Arc::new(TransactionSlot::new());
+
     loop {
         let received_messages: Vec<DataType> = io::read_messages(stream)?;
         for received_message in received_messages.into_iter() {
@@ -55,6 +61,7 @@ pub fn handle_connection(
                         elements,
                         storage,
                         server_state,
+                        &transaction,
                         should_reply,
                     )?;
                 }
@@ -76,11 +83,17 @@ fn handle_command(
     elements: &[DataType],
     storage: &Arc<Mutex<Storage>>,
     server_state: &Arc<ServerState>,
+    transaction: &Arc<TransactionSlot>,
     should_reply: bool,
 ) -> Result<(), anyhow::Error> {
     let command_name = commands::parse_command_name(received_message)?;
-    let Some(command) = build_command(&command_name, received_message, elements, server_state)
-    else {
+    let Some(command) = build_command(
+        &command_name,
+        received_message,
+        elements,
+        server_state,
+        transaction,
+    ) else {
         return Ok(());
     };
 
@@ -120,10 +133,12 @@ fn build_command(
     received_message: &DataType,
     elements: &[DataType],
     server_state: &Arc<ServerState>,
+    transaction: &Arc<TransactionSlot>,
 ) -> Option<Box<dyn RedisCommand>> {
     let message = received_message.clone();
     let state = || Arc::clone(server_state);
     let notifier = || Arc::clone(&server_state.blocking_notifier);
+    let transaction = || Arc::clone(transaction);
 
     let command: Box<dyn RedisCommand> = match command_name {
         "ECHO"     => Box::new(Echo { message, argument: elements.get(1).cloned() }),
@@ -131,7 +146,8 @@ fn build_command(
         "SET"      => Box::new(Set { message }),
         "GET"      => Box::new(Get { message }),
         "INCR"     => Box::new(Incr { message }),
-        "MULTI"    => Box::new(Multi { message }),
+        "MULTI"    => Box::new(Multi { message, transaction: transaction() }),
+        "EXEC"     => Box::new(Exec { message, transaction: transaction() }),
         "COMMAND"  => Box::new(Command { message }),
         "INFO"     => Box::new(Info { message, server_state: state() }),
         "REPLCONF" => Box::new(ReplConf { message, server_state: state() }),

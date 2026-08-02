@@ -13,12 +13,12 @@ pub mod command;
 pub mod set;
 pub mod get;
 pub mod incr;
-pub mod multi;
 pub mod info;
 pub mod replconf;
 pub mod psync;
 pub mod list;
 pub mod stream;
+pub mod transaction;
 pub mod r#type;
 
 // Re-export all command types for convenience
@@ -28,12 +28,12 @@ pub use command::Command;
 pub use set::Set;
 pub use get::Get;
 pub use incr::Incr;
-pub use multi::Multi;
 pub use info::Info;
 pub use replconf::ReplConf;
 pub use psync::PSync;
 pub use list::{RPush, LPush, LRange, LLen, LPop, BLPop};
 pub use stream::{XAdd, XRange, XRead};
+pub use transaction::{Multi, Exec};
 pub use r#type::Type;
 
 /// Trait for implementing Redis commands.
@@ -110,6 +110,17 @@ fn command_message(parts: &[&str]) -> DataType {
 #[cfg(test)]
 fn set(parts: &[&str]) -> Set {
     Set { message: command_message(parts) }
+}
+
+/// The text of the `-...\r\n` simple error `error` sends back. Panics if it is
+/// an internal error instead, since those close the connection rather than
+/// reaching the client.
+#[cfg(test)]
+fn client_error_message(error: anyhow::Error) -> String {
+    error
+        .downcast::<crate::error::RedisError>()
+        .expect("failure should be a client-facing RedisError")
+        .message
 }
 
 #[cfg(test)]

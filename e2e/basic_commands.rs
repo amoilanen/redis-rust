@@ -314,17 +314,107 @@ fn test_commands_after_multi_still_execute_for_now() -> Result<()> {
 }
 
 #[test]
-fn test_multi_is_per_connection_and_repeatable() -> Result<()> {
-    // Two clients each get their own `+OK`, and a second MULTI on the same
-    // connection is answered too - nothing here is global server state.
+fn test_nested_multi_is_accepted_for_now() -> Result<()> {
+    // Real Redis replies `ERR MULTI calls can not be nested`. Until that lands,
+    // the second MULTI replaces the first transaction and one EXEC ends both.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+
+    assert_eq!(client.send_command_json(&["EXEC"])?, "[]");
+    let err = client.send_command(&["EXEC"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR EXEC without MULTI");
+    Ok(())
+}
+
+// ========================= EXEC =========================
+
+#[test]
+fn test_exec_without_multi_errors() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    let err = client.send_command(&["EXEC"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR EXEC without MULTI");
+    Ok(())
+}
+
+#[test]
+fn test_exec_error_leaves_the_connection_usable() -> Result<()> {
+    // A rejected EXEC is an error reply, not a connection failure.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert!(client.send_command(&["EXEC"]).is_err());
+    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "OK");
+    assert_eq!(client.send_command(&["INCR", "foo"])?, "42");
+
+    let err = client.send_command(&["EXEC"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR EXEC without MULTI");
+    Ok(())
+}
+
+#[test]
+fn test_exec_after_multi_on_another_connection_still_errors() -> Result<()> {
+    // B's failed EXEC must also leave A's transaction intact.
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client_a = server.client();
     let mut client_b = server.client();
 
     assert_eq!(client_a.send_command(&["MULTI"])?, "OK");
-    assert_eq!(client_b.send_command(&["MULTI"])?, "OK");
-    assert_eq!(client_a.send_command(&["MULTI"])?, "OK");
+
+    let err = client_b.send_command(&["EXEC"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR EXEC without MULTI");
+
+    assert_eq!(client_a.send_command_json(&["EXEC"])?, "[]");
+    Ok(())
+}
+
+#[test]
+fn test_exec_after_multi_replies_with_an_empty_array() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(client.send_command_json(&["EXEC"])?, "[]");
+
+    let err = client.send_command(&["EXEC"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR EXEC without MULTI");
+    Ok(())
+}
+
+#[test]
+fn test_transactions_can_be_repeated_on_one_connection() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    for round in 1..4 {
+        assert_eq!(client.send_command(&["MULTI"])?, "OK", "round {}", round);
+        assert_eq!(client.send_command_json(&["EXEC"])?, "[]", "round {}", round);
+    }
+    Ok(())
+}
+
+#[test]
+fn test_an_open_transaction_does_not_outlive_its_connection() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+
+    let mut abandoning_client = server.client();
+    assert_eq!(abandoning_client.send_command(&["MULTI"])?, "OK");
+    drop(abandoning_client);
+
+    let mut fresh_client = server.client();
+    let err = fresh_client.send_command(&["EXEC"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR EXEC without MULTI");
     Ok(())
 }
 
