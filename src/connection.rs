@@ -97,6 +97,19 @@ fn handle_command(
         return Ok(());
     };
 
+    // Inside a transaction a command is collected rather than run, so it must
+    // not reach storage, the replicas, or - for PSYNC - the replica registry.
+    // Queueing after `build_command` keeps an unrecognised command ignored the
+    // same way it is outside a transaction, instead of filling the queue with
+    // something EXEC could never run.
+    if transaction.queue(&command_name, received_message)? {
+        debug!("Queued {} in the open transaction", command_name);
+        if should_reply {
+            send_reply(stream, vec![protocol::simple_string("QUEUED")])?;
+        }
+        return Ok(());
+    }
+
     if command_name == "PSYNC" {
         register_replica(stream, server_state)?;
     }

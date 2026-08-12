@@ -177,7 +177,10 @@ impl RespClient {
     }
 
     /// Serialize `args` as a RESP array of bulk strings and write it out.
-    fn write_command(&mut self, args: &[&str]) -> anyhow::Result<()> {
+    ///
+    /// Public so that tests can send a command the server does not reply to and
+    /// then keep using the connection.
+    pub fn write_command(&mut self, args: &[&str]) -> anyhow::Result<()> {
         let mut buf = format!("*{}\r\n", args.len());
         for arg in args {
             buf.push_str(&format!("${}\r\n{}\r\n", arg.len(), arg));

@@ -300,16 +300,95 @@ fn test_multi_replies_ok() -> Result<()> {
 }
 
 #[test]
-fn test_commands_after_multi_still_execute_for_now() -> Result<()> {
-    // Queueing is a later stage: for now MULTI does not change how the
-    // following commands behave, so they run and reply normally.
+fn test_commands_after_multi_are_queued() -> Result<()> {
+    // The tester's sequence: every command after MULTI is acknowledged with
+    // `+QUEUED\r\n` instead of its own reply.
     let port = free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
     assert_eq!(client.send_command(&["MULTI"])?, "OK");
+
+    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "QUEUED");
+    assert_eq!(client.send_command(&["INCR", "foo"])?, "QUEUED");
+    Ok(())
+}
+
+#[test]
+fn test_queued_commands_do_not_touch_the_database() -> Result<()> {
+    // A second connection is how the tester checks that the queued SET never
+    // ran: `foo` must still be missing.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut queueing_client = server.client();
+    let mut observer = server.client();
+
+    assert_eq!(queueing_client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(queueing_client.send_command(&["SET", "foo", "41"])?, "QUEUED");
+    assert_eq!(queueing_client.send_command(&["INCR", "foo"])?, "QUEUED");
+
+    assert_eq!(observer.send_command(&["GET", "foo"])?, "(nil)");
+    Ok(())
+}
+
+#[test]
+fn test_queueing_reads_does_not_run_them_either() -> Result<()> {
+    // Even a read replies `+QUEUED`, so the value seeded before MULTI is not
+    // reported back until the transaction runs.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
     assert_eq!(client.send_command(&["SET", "foo", "41"])?, "OK");
-    assert_eq!(client.send_command(&["INCR", "foo"])?, "42");
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+
+    assert_eq!(client.send_command(&["GET", "foo"])?, "QUEUED");
+    Ok(())
+}
+
+#[test]
+fn test_queueing_only_affects_the_connection_that_sent_multi() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut queueing_client = server.client();
+    let mut other_client = server.client();
+
+    assert_eq!(queueing_client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(queueing_client.send_command(&["SET", "foo", "41"])?, "QUEUED");
+
+    assert_eq!(other_client.send_command(&["SET", "bar", "1"])?, "OK");
+    assert_eq!(other_client.send_command(&["INCR", "bar"])?, "2");
+    Ok(())
+}
+
+#[test]
+fn test_a_queued_transaction_dies_with_its_connection() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+
+    let mut abandoning_client = server.client();
+    assert_eq!(abandoning_client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(abandoning_client.send_command(&["SET", "foo", "41"])?, "QUEUED");
+    drop(abandoning_client);
+
+    let mut fresh_client = server.client();
+    assert_eq!(fresh_client.send_command(&["GET", "foo"])?, "(nil)");
+    assert_eq!(fresh_client.send_command(&["SET", "foo", "1"])?, "OK");
+    Ok(())
+}
+
+#[test]
+fn test_unknown_commands_are_still_ignored_while_queueing() -> Result<()> {
+    // An unrecognised command gets no reply at all, in or out of a transaction,
+    // so the connection stays usable for the commands that follow it.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+    client.write_command(&["NOSUCHCOMMAND", "foo"])?;
+
+    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "QUEUED");
     Ok(())
 }
 
@@ -387,6 +466,37 @@ fn test_exec_after_multi_replies_with_an_empty_array() -> Result<()> {
 
     let err = client.send_command(&["EXEC"]).unwrap_err();
     assert_eq!(err.to_string(), "ERR EXEC without MULTI");
+    Ok(())
+}
+
+#[test]
+fn test_exec_discards_the_queued_commands_for_now() -> Result<()> {
+    // Running the queue is the next stage: for now EXEC only ends the
+    // transaction, so the queued SET never reaches the database.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "QUEUED");
+    assert_eq!(client.send_command_json(&["EXEC"])?, "[]");
+
+    assert_eq!(client.send_command(&["GET", "foo"])?, "(nil)");
+    Ok(())
+}
+
+#[test]
+fn test_commands_run_again_once_exec_has_ended_the_transaction() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "QUEUED");
+    assert_eq!(client.send_command_json(&["EXEC"])?, "[]");
+
+    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "OK");
+    assert_eq!(client.send_command(&["INCR", "foo"])?, "42");
     Ok(())
 }
 

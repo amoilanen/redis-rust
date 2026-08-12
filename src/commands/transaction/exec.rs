@@ -4,9 +4,9 @@
 /// Returns: an array of the queued commands' replies, or
 ///          `-ERR EXEC without MULTI` when no transaction is open.
 ///
-/// Queueing is a later stage, so the transaction is always empty and the array
-/// is always `*0\r\n` - which Redis treats as a successful run of a transaction
-/// that had nothing in it, not as an error.
+/// Running the queued commands is a later stage: for now EXEC ends the
+/// transaction and discards them, always replying `*0\r\n` - which Redis treats
+/// as a successful run of a transaction that had nothing in it, not as an error.
 
 use std::sync::{Arc, Mutex};
 
@@ -29,7 +29,7 @@ impl RedisCommand for Exec {
     fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
         expect_no_arguments(&self.message, "exec")?;
 
-        let Some(_transaction) = self.transaction.take()? else {
+        let Some(transaction) = self.transaction.take()? else {
             debug!("EXEC without MULTI");
             return Err(RedisError {
                 message: "ERR EXEC without MULTI".to_string(),
@@ -37,7 +37,10 @@ impl RedisCommand for Exec {
             .into());
         };
 
-        debug!("EXEC: ran an empty transaction");
+        debug!(
+            "EXEC: ended a transaction, discarding {} queued command(s)",
+            transaction.queued().len()
+        );
 
         Ok(vec![protocol::array(vec![])])
     }
@@ -96,6 +99,20 @@ mod tests {
 
         assert_eq!(result, vec![protocol::array(vec![])]);
         assert_eq!(result[0].serialize(), b"*0\r\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_exec_discards_the_queued_commands_for_now() -> anyhow::Result<()> {
+        // Running them is the next stage; ending the transaction is this one.
+        let storage = create_test_storage();
+        let transaction = open_transaction()?;
+        transaction.queue("SET", &command_message(&["SET", "foo", "41"]))?;
+
+        let result = exec(&["EXEC"], &transaction).execute(&storage)?;
+
+        assert_eq!(result, vec![protocol::array(vec![])]);
+        assert!(transaction.take()?.is_none());
         Ok(())
     }
 

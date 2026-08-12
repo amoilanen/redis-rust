@@ -19,8 +19,22 @@ pub use exec::Exec;
 /// A transaction, opened by MULTI and consumed by EXEC.
 ///
 /// There is no way to reopen one: EXEC takes it by value, and a later MULTI
-/// starts a new transaction. Holds the queued commands once queueing lands.
-pub struct Transaction;
+/// starts a new transaction. Holds the commands queued since MULTI as the
+/// messages they arrived as, so EXEC can run them unchanged.
+pub struct Transaction {
+    queued: Vec<DataType>,
+}
+
+impl Transaction {
+    fn new() -> Self {
+        Transaction { queued: Vec::new() }
+    }
+
+    /// The queued commands, oldest first - the order EXEC has to run them in.
+    pub fn queued(&self) -> &[DataType] {
+        &self.queued
+    }
+}
 
 /// The at-most-one transaction open on a connection.
 ///
@@ -36,11 +50,32 @@ impl TransactionSlot {
         TransactionSlot { open: Mutex::new(None) }
     }
 
-    /// Discards any transaction already open. Real Redis instead rejects a
-    /// nested MULTI, which is not part of this stage.
+    /// Discards any transaction already open, queued commands included. Real
+    /// Redis instead rejects a nested MULTI, which is not part of this stage.
     pub fn open(&self) -> Result<()> {
-        *self.lock()? = Some(Transaction);
+        *self.lock()? = Some(Transaction::new());
         Ok(())
+    }
+
+    /// Appends `command` to the open transaction, reporting whether it was
+    /// queued - that is, whether the connection is inside a transaction at all.
+    ///
+    /// `command_name` is the name as it arrived: MULTI and EXEC act on the
+    /// transaction itself, so they run rather than being queued into it.
+    ///
+    /// The check and the append share one lock so that a command can never be
+    /// queued into a transaction EXEC has already taken.
+    pub fn queue(&self, command_name: &str, command: &DataType) -> Result<bool> {
+        if is_transaction_control(command_name) {
+            return Ok(false);
+        }
+
+        let mut slot = self.lock()?;
+        let Some(transaction) = slot.as_mut() else {
+            return Ok(false);
+        };
+        transaction.queued.push(command.clone());
+        Ok(true)
     }
 
     pub fn take(&self) -> Result<Option<Transaction>> {
@@ -58,6 +93,14 @@ impl Default for TransactionSlot {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Whether `command_name` drives the transaction rather than belonging in it.
+///
+/// These are the commands that keep running while a transaction is open; every
+/// other command is queued.
+fn is_transaction_control(command_name: &str) -> bool {
+    matches!(command_name, "MULTI" | "EXEC")
 }
 
 /// Rejects anything beyond the command name, which both MULTI and EXEC do
@@ -153,6 +196,90 @@ mod tests {
 
         assert!(slot.take()?.is_some());
         assert!(slot.take()?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_queueing_without_a_transaction_reports_nothing_was_queued() -> Result<()> {
+        let slot = TransactionSlot::new();
+
+        assert!(!slot.queue("SET", &command_message(&["SET", "foo", "41"]))?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_a_new_transaction_has_nothing_queued() -> Result<()> {
+        let slot = TransactionSlot::new();
+
+        slot.open()?;
+
+        assert!(slot.take()?.unwrap().queued().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_queued_commands_are_kept_in_arrival_order() -> Result<()> {
+        let slot = TransactionSlot::new();
+        slot.open()?;
+        let set = command_message(&["SET", "foo", "41"]);
+        let incr = command_message(&["INCR", "foo"]);
+
+        assert!(slot.queue("SET", &set)?);
+        assert!(slot.queue("INCR", &incr)?);
+
+        assert_eq!(slot.take()?.unwrap().queued(), &[set, incr]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_the_same_command_can_be_queued_more_than_once() -> Result<()> {
+        let slot = TransactionSlot::new();
+        slot.open()?;
+        let incr = command_message(&["INCR", "foo"]);
+
+        for _ in 0..3 {
+            slot.queue("INCR", &incr)?;
+        }
+
+        assert_eq!(slot.take()?.unwrap().queued().len(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_transaction_control_commands_are_not_queued() -> Result<()> {
+        // MULTI and EXEC have to reach their own implementations to nest or end
+        // the transaction, so they must run instead of being queued into it.
+        let slot = TransactionSlot::new();
+        slot.open()?;
+
+        assert!(!slot.queue("MULTI", &command_message(&["MULTI"]))?);
+        assert!(!slot.queue("EXEC", &command_message(&["EXEC"]))?);
+
+        assert!(slot.take()?.unwrap().queued().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_taking_a_transaction_discards_its_queue() -> Result<()> {
+        let slot = TransactionSlot::new();
+        slot.open()?;
+        slot.queue("SET", &command_message(&["SET", "foo", "41"]))?;
+
+        slot.take()?;
+
+        assert!(!slot.queue("INCR", &command_message(&["INCR", "foo"]))?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_reopening_starts_from_an_empty_queue() -> Result<()> {
+        let slot = TransactionSlot::new();
+        slot.open()?;
+        slot.queue("SET", &command_message(&["SET", "foo", "41"]))?;
+
+        slot.open()?;
+
+        assert!(slot.take()?.unwrap().queued().is_empty());
         Ok(())
     }
 

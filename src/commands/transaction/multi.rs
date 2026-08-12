@@ -3,9 +3,10 @@
 /// Syntax: MULTI
 /// Returns: +OK
 ///
-/// In real Redis it also switches the connection into a queueing mode where
-/// subsequent commands reply `+QUEUED` instead of executing. That comes in a
-/// later stage, so for now the transaction is only ever empty.
+/// Opening a transaction also switches the connection into queueing mode: the
+/// commands that follow reply `+QUEUED` and are collected instead of run. The
+/// queueing itself happens in `connection`, which sees every command; MULTI
+/// only has to put an empty transaction in the slot.
 
 use std::sync::{Arc, Mutex};
 
@@ -83,6 +84,30 @@ mod tests {
         multi(&["MULTI"], &transaction).execute(&storage)?;
 
         assert!(transaction.take()?.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn test_multi_starts_the_transaction_empty() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let transaction = no_transaction();
+
+        multi(&["MULTI"], &transaction).execute(&storage)?;
+
+        assert!(transaction.take()?.unwrap().queued().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_commands_are_queued_once_multi_has_run() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let transaction = no_transaction();
+        let set = command_message(&["SET", "foo", "41"]);
+
+        assert!(!transaction.queue("SET", &set)?, "queued before MULTI");
+        multi(&["MULTI"], &transaction).execute(&storage)?;
+
+        assert!(transaction.queue("SET", &set)?);
         Ok(())
     }
 
