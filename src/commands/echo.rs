@@ -10,15 +10,16 @@ use super::RedisCommand;
 
 /// ECHO command implementation.
 pub struct Echo {
-    pub message: DataType,
-    pub argument: Option<DataType>,
+    pub message: DataType
 }
 
 impl RedisCommand for Echo {
     fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+        let elements = self.message.as_vec()?;
+        let argument = elements.get(1);
         let mut reply: Vec<DataType> = Vec::new();
-        if let Some(echo_argument) = &self.argument {
-            reply = vec![echo_argument.clone()];
+        if let Some(echo_argument) = argument {
+            reply = vec![echo_argument.to_owned()];
         }
         Ok(reply)
     }
@@ -49,15 +50,9 @@ mod tests {
             protocol::bulk_string("ECHO"),
             echo_msg.clone(),
         ]);
-        let elements: Vec<DataType> = message.as_vec()
-            .unwrap()
-            .iter()
-            .map(|s| protocol::bulk_string(s))
-            .collect();
 
         let cmd = Echo {
-            message,
-            argument: Some(elements[1].clone()),
+            message
         };
 
         let storage = Arc::new(std::sync::Mutex::new(Storage::new(
@@ -73,8 +68,7 @@ mod tests {
     fn test_echo_command_without_message() {
         let message = command_message(&["ECHO"]);
         let cmd = Echo {
-            message,
-            argument: None,
+            message
         };
 
         let storage = Arc::new(std::sync::Mutex::new(Storage::new(

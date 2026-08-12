@@ -39,7 +39,6 @@ impl RedisCommand for Command {
 pub(crate) fn build_command(
     command_name: &str,
     received_message: &DataType,
-    elements: &[DataType],
     server_state: &Arc<ServerState>,
     transaction: &Arc<TransactionSlot>,
 ) -> Option<Box<dyn RedisCommand>> {
@@ -49,7 +48,7 @@ pub(crate) fn build_command(
     let transaction = || Arc::clone(transaction);
 
     let command: Box<dyn RedisCommand> = match command_name {
-        "ECHO"     => Box::new(Echo { message, argument: elements.get(1).cloned() }),
+        "ECHO"     => Box::new(Echo { message }),
         "PING"     => Box::new(Ping { message }),
         "SET"      => Box::new(Set { message }),
         "GET"      => Box::new(Get { message }),

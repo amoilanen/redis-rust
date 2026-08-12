@@ -27,7 +27,7 @@ pub struct XRange {
 
 impl RedisCommand for XRange {
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
-        let instructions: Vec<String> = self.message.as_vec()?;
+        let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: "ERR wrong number of arguments for 'xrange' command".to_string(),
         };

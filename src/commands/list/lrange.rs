@@ -26,7 +26,7 @@ pub struct LRange {
 impl RedisCommand for LRange {
 
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
-        let instructions: Vec<String> = self.message.as_vec()?;
+        let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: "Invalid LRANGE command syntax".to_string(),
         };

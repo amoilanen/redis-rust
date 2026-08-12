@@ -47,14 +47,9 @@ fn e2e_echo_returns_argument() -> Result<()> {
         protocol::bulk_string("ECHO"),
         echo_msg.clone(),
     ]);
-    let elements: Vec<DataType> = message.as_vec()?
-        .iter()
-        .map(|s| protocol::bulk_string(s))
-        .collect();
 
     let cmd = Echo {
-        message,
-        argument: Some(elements[1].clone()),
+        message
     };
 
     let storage = create_test_storage();

@@ -38,7 +38,7 @@ pub struct XRead {
 
 impl RedisCommand for XRead {
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
-        let instructions: Vec<String> = self.message.as_vec()?;
+        let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: format!("ERR cannot parse 'xread' command: {}", self.message.as_string()?),
         };

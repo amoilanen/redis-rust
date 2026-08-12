@@ -22,7 +22,7 @@ pub struct Set {
 
 impl RedisCommand for Set {
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
-        let instructions: Vec<String> = self.message.as_vec()?;
+        let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: "Invalid SET command syntax".to_string(),
         };

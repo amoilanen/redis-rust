@@ -109,7 +109,7 @@ fn is_transaction_control(command_name: &str) -> bool {
 /// `command_name` is the lowercase name Redis quotes back, e.g. `exec` gives
 /// `ERR wrong number of arguments for 'exec' command`.
 fn expect_no_arguments(message: &DataType, command_name: &str) -> Result<()> {
-    let instructions: Vec<String> = message.as_vec()?;
+    let instructions: Vec<String> = message.as_string_vec()?;
     if instructions.len() != 1 {
         return Err(RedisError {
             message: format!(

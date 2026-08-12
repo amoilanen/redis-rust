@@ -139,7 +139,7 @@ pub fn boolean(value: bool) -> DataType {
 
 impl DataType {
 
-    pub fn as_vec(&self) -> Result<Vec<String>, anyhow::Error> {
+    pub fn as_string_vec(&self) -> Result<Vec<String>, anyhow::Error> {
         match &self {
             &DataType::Array { elements } => {
                 let mut result: Vec<String> = Vec::new();
@@ -150,6 +150,17 @@ impl DataType {
             },
             _ => {
                 Ok(vec![self.as_string()?])
+            }
+        }
+    }
+
+    pub fn as_vec(&self) -> Result<Vec<DataType>, anyhow::Error> {
+        match &self {
+            &DataType::Array { elements } => {
+                Ok(elements.to_owned())
+            },
+            _ => {
+                Ok(vec![self.to_owned()])
             }
         }
     }
@@ -373,14 +384,14 @@ mod tests {
                 DataType::SimpleString { value: "hello".as_bytes().to_vec() },
                 DataType::Integer { value: 42 },
             ]
-        }.as_vec()?;
+        }.as_string_vec()?;
         assert_eq!(result, vec!["hello".to_string(), "42".to_string()]);
         Ok(())
     }
 
     #[test]
     fn should_wrap_non_array_as_single_element_array() -> Result<(), Box<dyn std::error::Error>> {
-        let result = DataType::SimpleString { value: "hello".as_bytes().to_vec() }.as_vec()?;
+        let result = DataType::SimpleString { value: "hello".as_bytes().to_vec() }.as_string_vec()?;
         assert_eq!(result, vec!["hello".to_string()]);
         Ok(())
     }

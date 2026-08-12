@@ -64,7 +64,7 @@ pub trait RedisCommand {
 /// # Errors
 /// Returns error if message cannot be converted to array
 pub fn parse_command_name(received_message: &DataType) -> Result<String, anyhow::Error> {
-    let received_message_parts: Vec<String> = received_message.as_vec()?;
+    let received_message_parts: Vec<String> = received_message.as_string_vec()?;
     let command_parts: Vec<&str> = received_message_parts.iter().map(|x| x.as_str()).collect();
     let command_name = command_parts.get(0).unwrap_or(&"").to_string();
     Ok(command_name)

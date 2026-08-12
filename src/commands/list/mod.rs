@@ -113,7 +113,7 @@ fn push_to_list<F>(
 where
     F: Fn(&mut Vec<DataType>, &str),
 {
-    let instructions: Vec<String> = message.as_vec()?;
+    let instructions: Vec<String> = message.as_string_vec()?;
     let error = RedisError {
         message: format!("Invalid {} command syntax", command_name),
     };

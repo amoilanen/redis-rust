@@ -21,7 +21,7 @@ pub struct PSync {
 impl RedisCommand for PSync {
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
         let mut reply = Vec::new();
-        let instructions: Vec<String> = self.message.as_vec()?;
+        let instructions: Vec<String> = self.message.as_string_vec()?;
 
         let replication_id = instructions
             .get(1)

@@ -20,7 +20,7 @@ pub struct Info {
 
 impl RedisCommand for Info {
     fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
-        let instructions: Vec<String> = self.message.as_vec()?;
+        let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: "INFO command should have one argument".to_string(),
         };

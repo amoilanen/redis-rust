@@ -19,7 +19,7 @@ pub struct Type {
 
 impl RedisCommand for Type {
     fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
-        let instructions: Vec<String> = self.message.as_vec()?;
+        let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: "Invalid TYPE command syntax".to_string(),
         };

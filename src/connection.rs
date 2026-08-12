@@ -54,11 +54,10 @@ pub fn handle_connection(
                 String::from_utf8_lossy(&received_message.serialize()).replace("\r\n", "\\r\\n")
             );
             match &received_message {
-                DataType::Array { elements } => {
+                DataType::Array { elements: _ } => {
                     handle_command(
                         stream,
                         &received_message,
-                        elements,
                         storage,
                         server_state,
                         &transaction,
@@ -80,7 +79,6 @@ pub fn handle_connection(
 fn handle_command(
     stream: &mut TcpStream,
     received_message: &DataType,
-    elements: &[DataType],
     storage: &Arc<Mutex<Storage>>,
     server_state: &Arc<ServerState>,
     transaction: &Arc<TransactionSlot>,
@@ -90,7 +88,6 @@ fn handle_command(
     let Some(command) = command::build_command(
         &command_name,
         received_message,
-        elements,
         server_state,
         transaction,
     ) else {
