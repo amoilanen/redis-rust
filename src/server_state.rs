@@ -1,7 +1,10 @@
+use anyhow::anyhow;
+use log::*;
+use std::io::Write;
 use std::net::TcpStream;
-
 use std::sync::{Arc, Mutex};
 use rand::Rng;
+use crate::commands::RedisCommand;
 use crate::blocking::BlockingNotifier;
 use crate::error::RedisError;
 
@@ -24,6 +27,35 @@ impl ServerState {
 
     pub fn is_replica(&self) -> bool {
         !self.is_master()
+    }
+
+    pub fn register_replica(
+        &self,
+        stream: &TcpStream
+    ) -> Result<(), anyhow::Error> {
+        self
+            .replica_connections
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock replica connections: {}", e))?
+            .push(stream.try_clone()?);
+        Ok(())
+    }
+
+
+    pub fn propagate_to_replicas(
+        &self,
+        command: &dyn RedisCommand
+    ) -> Result<(), anyhow::Error> {
+        let command_bytes = command.serialize();
+        let mut replica_streams = self
+            .replica_connections
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock replica connections: {}", e))?;
+        for replica_stream in replica_streams.iter_mut() {
+            debug!("Propagating command to replica: {:?}", &command_bytes);
+            replica_stream.write_all(&command_bytes)?;
+        }
+        Ok(())
     }
 
     pub fn get_replica_of_address(&self) -> Result<Option<String>, anyhow::Error> {
