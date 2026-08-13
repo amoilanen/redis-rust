@@ -53,6 +53,10 @@ impl RedisCommand for Incr {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "INCR"
+    }
 }
 
 #[cfg(test)]

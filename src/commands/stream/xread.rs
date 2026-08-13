@@ -136,6 +136,10 @@ impl RedisCommand for XRead {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "XREAD"
+    }
 }
 
 /// Resolves the requested IDs into exclusive lower bounds, one per key.

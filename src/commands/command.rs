@@ -8,7 +8,7 @@ use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 use super::RedisCommand;
-use crate::commands::{Echo, Ping, Set, Get, Incr, Multi, Exec, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
+use crate::commands::{self, Echo, Ping, Set, Get, Incr, Multi, Exec, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
 use crate::commands::transaction::TransactionSlot;
 use crate::server_state::ServerState;
 
@@ -34,9 +34,25 @@ impl RedisCommand for Command {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "COMMAND"
+    }
 }
 
-pub(crate) fn build_command(
+pub(crate) fn command_from_message(received_message: &DataType,
+    server_state: &Arc<ServerState>,
+    transaction: &Arc<TransactionSlot>)  -> Result<Option<Box<dyn RedisCommand>>, anyhow::Error> {
+    let command_name = commands::parse_command_name(received_message)?;
+    Ok(build_command(
+        &command_name,
+        received_message,
+        server_state,
+        transaction,
+    ))
+}
+
+fn build_command(
     command_name: &str,
     received_message: &DataType,
     server_state: &Arc<ServerState>,
@@ -54,7 +70,7 @@ pub(crate) fn build_command(
         "GET"      => Box::new(Get { message }),
         "INCR"     => Box::new(Incr { message }),
         "MULTI"    => Box::new(Multi { message, transaction: transaction() }),
-        "EXEC"     => Box::new(Exec { message, transaction: transaction() }),
+        "EXEC"     => Box::new(Exec { message, transaction: transaction(), server_state: state() }),
         "COMMAND"  => Box::new(Command { message }),
         "INFO"     => Box::new(Info { message, server_state: state() }),
         "REPLCONF" => Box::new(ReplConf { message, server_state: state() }),

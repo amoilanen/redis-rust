@@ -88,6 +88,10 @@ impl RedisCommand for LPop {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "LPOP"
+    }
 }
 
 #[cfg(test)]

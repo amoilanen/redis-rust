@@ -47,6 +47,10 @@ impl RedisCommand for Multi {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "MULTI"
+    }
 }
 
 #[cfg(test)]

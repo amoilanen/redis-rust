@@ -51,6 +51,9 @@ pub trait RedisCommand {
 
     /// Serialize this command to its RESP protocol representation.
     fn serialize(&self) -> Vec<u8>;
+
+    /// Name of the commmand
+    fn name(&self) -> &str;
 }
 
 /// Parses the command name from a received message.

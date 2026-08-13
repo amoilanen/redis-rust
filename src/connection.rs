@@ -12,8 +12,7 @@ use std::sync::{Arc, Mutex};
 use crate::protocol::{self, DataType};
 use crate::error::RedisError;
 use crate::io;
-use crate::commands::{self, command};
-use crate::commands::transaction::TransactionSlot;
+use crate::commands::{command, transaction::TransactionSlot};
 use crate::storage::Storage;
 use crate::server_state::ServerState;
 
@@ -84,15 +83,14 @@ fn handle_command(
     transaction: &Arc<TransactionSlot>,
     should_reply: bool,
 ) -> Result<(), anyhow::Error> {
-    let command_name = commands::parse_command_name(received_message)?;
-    let Some(command) = command::build_command(
-        &command_name,
+    let Some(command) = command::command_from_message(
         received_message,
         server_state,
         transaction,
-    ) else {
+    )? else {
         return Ok(());
     };
+    let command_name = command.name();
 
     // Inside a transaction a command is collected rather than run, so it must
     // not reach storage, the replicas, or - for PSYNC - the replica registry.

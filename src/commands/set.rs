@@ -67,6 +67,10 @@ impl RedisCommand for Set {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "SET"
+    }
 }
 
 #[cfg(test)]

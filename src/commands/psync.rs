@@ -69,6 +69,10 @@ impl RedisCommand for PSync {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "PSYNC"
+    }
 }
 
 #[cfg(test)]

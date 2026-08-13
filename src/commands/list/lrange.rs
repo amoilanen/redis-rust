@@ -64,6 +64,10 @@ impl RedisCommand for LRange {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "LRANGE"
+    }
 }
 
 #[cfg(test)]

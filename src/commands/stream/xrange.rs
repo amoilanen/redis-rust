@@ -63,6 +63,10 @@ impl RedisCommand for XRange {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "XRANGE"
+    }
 }
 
 #[cfg(test)]

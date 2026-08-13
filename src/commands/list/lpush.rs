@@ -45,6 +45,10 @@ impl RedisCommand for LPush {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "LPUSH"
+    }
 }
 
 #[cfg(test)]

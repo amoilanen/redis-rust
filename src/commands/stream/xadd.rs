@@ -65,6 +65,10 @@ impl RedisCommand for XAdd {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "XADD"
+    }
 }
 
 #[cfg(test)]

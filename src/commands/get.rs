@@ -50,6 +50,10 @@ impl RedisCommand for Get {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "GET"
+    }
 }
 
 #[cfg(test)]

@@ -35,6 +35,10 @@ impl RedisCommand for Echo {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "ECHO"
+    }
 }
 
 #[cfg(test)]

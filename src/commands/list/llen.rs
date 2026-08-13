@@ -52,6 +52,10 @@ impl RedisCommand for LLen {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "LLEN"
+    }
 }
 
 #[cfg(test)]

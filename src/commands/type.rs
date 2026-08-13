@@ -61,6 +61,10 @@ impl RedisCommand for Type {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "TYPE"
+    }
 }
 
 #[cfg(test)]

@@ -470,7 +470,7 @@ fn test_exec_after_multi_replies_with_an_empty_array() -> Result<()> {
 }
 
 #[test]
-fn test_exec_discards_the_queued_commands_for_now() -> Result<()> {
+fn test_exec_executes_single_queued_command() -> Result<()> {
     // Running the queue is the next stage: for now EXEC only ends the
     // transaction, so the queued SET never reaches the database.
     let port = free_port();
@@ -479,9 +479,9 @@ fn test_exec_discards_the_queued_commands_for_now() -> Result<()> {
 
     assert_eq!(client.send_command(&["MULTI"])?, "OK");
     assert_eq!(client.send_command(&["SET", "foo", "41"])?, "QUEUED");
-    assert_eq!(client.send_command_json(&["EXEC"])?, "[]");
+    assert_eq!(client.send_command_json(&["EXEC"])?, "[\"OK\"]");
 
-    assert_eq!(client.send_command(&["GET", "foo"])?, "(nil)");
+    assert_eq!(client.send_command(&["GET", "foo"])?, "41");
     Ok(())
 }
 
@@ -493,10 +493,10 @@ fn test_commands_run_again_once_exec_has_ended_the_transaction() -> Result<()> {
 
     assert_eq!(client.send_command(&["MULTI"])?, "OK");
     assert_eq!(client.send_command(&["SET", "foo", "41"])?, "QUEUED");
-    assert_eq!(client.send_command_json(&["EXEC"])?, "[]");
+    assert_eq!(client.send_command_json(&["EXEC"])?, "[\"OK\"]");
 
-    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "OK");
-    assert_eq!(client.send_command(&["INCR", "foo"])?, "42");
+    assert_eq!(client.send_command(&["SET", "foo", "42"])?, "OK");
+    assert_eq!(client.send_command(&["INCR", "foo"])?, "43");
     Ok(())
 }
 

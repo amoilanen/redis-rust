@@ -100,6 +100,10 @@ impl RedisCommand for BLPop {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "BLPOP"
+    }
 }
 
 #[cfg(test)]

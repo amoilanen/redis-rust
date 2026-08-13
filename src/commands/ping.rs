@@ -30,6 +30,10 @@ impl RedisCommand for Ping {
     fn serialize(&self) -> Vec<u8> {
         self.message.serialize()
     }
+
+    fn name(&self) -> &str {
+        "PING"
+    }
 }
 
 #[cfg(test)]
