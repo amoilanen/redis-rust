@@ -501,6 +501,23 @@ fn test_commands_run_again_once_exec_has_ended_the_transaction() -> Result<()> {
 }
 
 #[test]
+fn test_several_commands_in_transaction() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(client.send_command(&["SET", "x", "1"])?, "QUEUED");
+    assert_eq!(client.send_command(&["SET", "y", "3"])?, "QUEUED");
+    assert_eq!(client.send_command(&["INCR", "x"])?, "QUEUED");
+    assert_eq!(client.send_command_json(&["EXEC"])?, "[\"OK\",\"OK\",2]");
+
+    assert_eq!(client.send_command(&["GET", "x"])?, "2");
+    assert_eq!(client.send_command(&["GET", "y"])?, "3");
+    Ok(())
+}
+
+#[test]
 fn test_transactions_can_be_repeated_on_one_connection() -> Result<()> {
     let port = free_port();
     let server = ServerProcess::start_master(port);

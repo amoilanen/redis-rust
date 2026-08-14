@@ -38,7 +38,6 @@ impl RedisCommand for Exec {
             .into());
         };
 
-        //TODO: Add tests, re-factor
         let mut commands: Vec<Box<dyn RedisCommand>> = Vec::new();
         for received_message in transaction.queued().iter() {
             // Transaction is empty at this point (it was taken from), but it is OK to start a nested transaction on this connection if required
@@ -141,6 +140,22 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], protocol::array(vec![protocol::simple_string("OK")]));
+        assert!(transaction.take()?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_exec_executes_multiple_commands() -> anyhow::Result<()> {
+        // Running them is the next stage; ending the transaction is this one.
+        let storage = create_test_storage();
+        let state = server_state();
+        let transaction = open_transaction()?;
+        transaction.queue("SET", &command_message(&["SET", "x", "1"]))?;
+        transaction.queue("GET", &command_message(&["GET", "x"]))?;
+        let result = exec(&["EXEC"], &transaction, &state).execute(&storage)?;
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], protocol::array(vec![protocol::simple_string("OK"), protocol::bulk_string("1")]));
         assert!(transaction.take()?.is_none());
         Ok(())
     }
