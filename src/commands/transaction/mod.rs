@@ -12,9 +12,11 @@ use crate::protocol::DataType;
 
 pub mod multi;
 pub mod exec;
+pub mod discard;
 
 pub use multi::Multi;
 pub use exec::Exec;
+pub use discard::Discard;
 
 /// A transaction, opened by MULTI and consumed by EXEC.
 ///
@@ -100,7 +102,7 @@ impl Default for TransactionSlot {
 /// These are the commands that keep running while a transaction is open; every
 /// other command is queued.
 fn is_transaction_control(command_name: &str) -> bool {
-    matches!(command_name, "MULTI" | "EXEC")
+    matches!(command_name, "MULTI" | "EXEC" | "DISCARD")
 }
 
 /// Rejects anything beyond the command name, which both MULTI and EXEC do

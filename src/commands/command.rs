@@ -8,7 +8,7 @@ use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 use super::RedisCommand;
-use crate::commands::{self, Echo, Ping, Set, Get, Incr, Multi, Exec, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
+use crate::commands::{self, Echo, Ping, Set, Get, Incr, Multi, Exec, Discard, Info, ReplConf, PSync, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
 use crate::commands::transaction::TransactionSlot;
 use crate::server_state::ServerState;
 
@@ -71,6 +71,7 @@ fn build_command(
         "INCR"     => Box::new(Incr { message }),
         "MULTI"    => Box::new(Multi { message, transaction: transaction() }),
         "EXEC"     => Box::new(Exec { message, transaction: transaction(), server_state: state() }),
+        "DISCARD"  => Box::new(Discard { message, transaction: transaction() }),
         "COMMAND"  => Box::new(Command { message }),
         "INFO"     => Box::new(Info { message, server_state: state() }),
         "REPLCONF" => Box::new(ReplConf { message, server_state: state() }),

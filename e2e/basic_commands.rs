@@ -545,6 +545,84 @@ fn test_an_open_transaction_does_not_outlive_its_connection() -> Result<()> {
     Ok(())
 }
 
+// ========================= DISCARD =========================
+
+#[test]
+fn test_discard_without_multi_errors() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    let err = client.send_command(&["DISCARD"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR DISCARD without MULTI");
+    Ok(())
+}
+
+#[test]
+fn test_discard_error_leaves_the_connection_usable() -> Result<()> {
+    // A rejected EXEC is an error reply, not a connection failure.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert!(client.send_command(&["DISCARD"]).is_err());
+    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "OK");
+    assert_eq!(client.send_command(&["INCR", "foo"])?, "42");
+
+    let err = client.send_command(&["DISCARD"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR DISCARD without MULTI");
+    Ok(())
+}
+
+#[test]
+fn test_discard_after_multi_on_another_connection_still_errors() -> Result<()> {
+    // B's failed EXEC must also leave A's transaction intact.
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client_a = server.client();
+    let mut client_b = server.client();
+
+    assert_eq!(client_a.send_command(&["MULTI"])?, "OK");
+
+    let err = client_b.send_command(&["DISCARD"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR DISCARD without MULTI");
+
+    assert_eq!(client_a.send_command(&["DISCARD"])?, "OK");
+    Ok(())
+}
+
+#[test]
+fn test_discard_discards_active_transaction() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "QUEUED");
+    assert_eq!(client.send_command(&["DISCARD"])?, "OK");
+
+    let err = client.send_command(&["EXEC"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR EXEC without MULTI");
+    Ok(())
+}
+
+#[test]
+fn test_transaction_can_be_restarted_after_discard() -> Result<()> {
+    let port = free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(client.send_command(&["SET", "foo", "41"])?, "QUEUED");
+    assert_eq!(client.send_command(&["DISCARD"])?, "OK");
+
+    assert_eq!(client.send_command(&["MULTI"])?, "OK");
+    assert_eq!(client.send_command(&["SET", "foo", "42"])?, "QUEUED");
+    assert_eq!(client.send_command_json(&["EXEC"])?, "[\"OK\"]");
+
+    Ok(())
+}
+
 // ========================= INFO =========================
 
 #[test]
