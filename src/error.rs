@@ -15,8 +15,7 @@ impl RedisError {
     }
 
     pub(crate) fn as_protocol_error(&self) -> DataType {
-        let formatted = format!("ERR {}", self.message);
-        protocol::simple_error(&formatted)
+        protocol::simple_error(&self.message)
     }
 }
 

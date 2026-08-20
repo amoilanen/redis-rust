@@ -181,7 +181,7 @@ mod tests {
         let result = exec(&["EXEC"], &transaction, &state).execute(&storage)?;
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0], protocol::array(vec![protocol::simple_string("OK"), protocol::simple_error("ERR Invalid SET command syntax")]));
+        assert_eq!(result[0], protocol::array(vec![protocol::simple_string("OK"), protocol::simple_error("Invalid SET command syntax")]));
         assert!(transaction.take()?.is_none());
         Ok(())
     }
