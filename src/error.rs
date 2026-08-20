@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::protocol::{self, DataType};
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct RedisError {
     pub message: String,
@@ -10,6 +12,11 @@ impl RedisError {
         RedisError {
             message: message.to_owned()
         }
+    }
+
+    pub(crate) fn as_protocol_error(&self) -> DataType {
+        let formatted = format!("ERR {}", self.message);
+        protocol::simple_error(&formatted)
     }
 }
 

@@ -9,6 +9,7 @@
 /// as a successful run of a transaction that had nothing in it, not as an error.
 
 use std::sync::{Arc, Mutex};
+use std::convert::identity;
 
 use log::*;
 
@@ -48,7 +49,17 @@ impl RedisCommand for Exec {
 
         let mut command_results: Vec<DataType> = Vec::new();
         for command in commands.iter() {
-            let mut command_result = command.execute(storage)?;
+            let mut command_result = command.execute(storage)
+                .map_or_else(
+                    |err| {
+                        err.downcast_ref::<RedisError>()
+                            .map_or_else(
+                                || vec![protocol::simple_error(&err.to_string())],
+                                |e| vec![e.as_protocol_error()]
+                            )
+                    },
+                    identity
+            );
             command_results.append(&mut command_result);
         }
 
@@ -156,6 +167,21 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], protocol::array(vec![protocol::simple_string("OK"), protocol::bulk_string("1")]));
+        assert!(transaction.take()?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_exec_multiple_commands_one_command_fails() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        let state = server_state();
+        let transaction = open_transaction()?;
+        transaction.queue("SET", &command_message(&["SET", "x", "1"]))?;
+        transaction.queue("SET", &command_message(&["SET"]))?;
+        let result = exec(&["EXEC"], &transaction, &state).execute(&storage)?;
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], protocol::array(vec![protocol::simple_string("OK"), protocol::simple_error("ERR Invalid SET command syntax")]));
         assert!(transaction.take()?.is_none());
         Ok(())
     }
