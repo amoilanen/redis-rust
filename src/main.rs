@@ -1,5 +1,5 @@
 use std::net::TcpListener;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -9,8 +9,6 @@ use codecrafters_redis::cli;
 use codecrafters_redis::connection;
 use codecrafters_redis::replication;
 use codecrafters_redis::server_state::ServerState;
-use codecrafters_redis::storage::{Storage, StoredValue};
-use std::collections::HashMap;
 
 const DEFAULT_PORT: usize = 6379;
 
@@ -24,15 +22,11 @@ fn main() -> Result<(), anyhow::Error> {
 
     let server_state = Arc::new(ServerState::new(replica_of.clone(), port));
 
-    let redis_data: HashMap<String, StoredValue> = HashMap::new();
-    let storage: Arc<Mutex<Storage>> = Arc::new(Mutex::new(Storage::new(redis_data)));
-
     // If this is a replica, spawn a thread to connect to the master
     if let Some(replica_of_address) = server_state.get_replica_of_address()? {
-        let storage = Arc::clone(&storage);
         let server_state = Arc::clone(&server_state);
         thread::spawn(move || {
-            if let Err(e) = replication::join_as_replica(&replica_of_address, &server_state, &storage) {
+            if let Err(e) = replication::join_as_replica(&replica_of_address, &server_state) {
                 error!("Failed to join replica: {}", e);
             }
         });
@@ -45,7 +39,6 @@ fn main() -> Result<(), anyhow::Error> {
     // Accept incoming connections
     for incoming_connection in listener.incoming() {
         let mut stream = incoming_connection?;
-        let storage = Arc::clone(&storage);
         let server_state = Arc::clone(&server_state);
 
         // Set read timeout for the connection
@@ -53,7 +46,7 @@ fn main() -> Result<(), anyhow::Error> {
 
         // Handle connection in a separate thread
         thread::spawn(move || {
-            if let Err(e) = connection::handle_connection(&mut stream, &storage, &server_state, true) {
+            if let Err(e) = connection::handle_connection(&mut stream, &server_state, true) {
                 error!("Connection handler error: {}", e);
             }
         });

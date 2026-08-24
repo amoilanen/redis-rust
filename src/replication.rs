@@ -7,12 +7,11 @@ use anyhow::{anyhow, ensure};
 use log::*;
 use std::io::Write;
 use std::net::TcpStream;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::protocol;
 use crate::io;
-use crate::storage::Storage;
 use crate::server_state::ServerState;
 
 /// Initiates a replica connection to a master node.
@@ -27,15 +26,14 @@ use crate::server_state::ServerState;
 ///
 /// # Arguments
 /// * `master_address` - Address of master in format "host:port"
-/// * `server_state` - Server state for storing replication info
-/// * `storage` - Storage to receive replicated commands
+/// * `server_state` - Server state for storing replication info, and the
+///   keyspace the replicated commands are applied to
 ///
 /// # Returns
 /// Error if handshake fails or connection is lost
 pub fn join_as_replica(
     master_address: &str,
     server_state: &Arc<ServerState>,
-    storage: &Arc<Mutex<Storage>>,
 ) -> Result<(), anyhow::Error> {
     let mut stream = TcpStream::connect(master_address)?;
     stream.set_read_timeout(Some(Duration::new(5, 0)))?;
@@ -95,6 +93,6 @@ pub fn join_as_replica(
     info!("Replica listening for commands from master...");
 
     // Step 5-6: Receive RDB and enter replication loop
-    crate::connection::handle_connection(&mut stream, storage, server_state, false)?;
+    crate::connection::handle_connection(&mut stream, server_state, false)?;
     Ok(())
 }

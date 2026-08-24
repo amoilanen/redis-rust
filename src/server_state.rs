@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use log::*;
+use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
@@ -7,6 +8,7 @@ use rand::Rng;
 use crate::commands::RedisCommand;
 use crate::blocking::BlockingNotifier;
 use crate::error::RedisError;
+use crate::storage::Storage;
 
 pub struct ServerState {
     pub port: usize,
@@ -15,11 +17,24 @@ pub struct ServerState {
     pub master_replication_offset: Option<usize>,
     pub replica_connections: Arc<Mutex<Vec<TcpStream>>>,
     pub blocking_notifier: Arc<BlockingNotifier>,
+    /// The keyspace this server serves. Private so it is reached through
+    /// [`ServerState::storage`], which hands out a bare `Storage` handle:
+    /// commands take the keyspace alone, never the whole server state.
+    storage: Arc<Mutex<Storage>>,
 }
 
 impl ServerState {
 
     const REPLICATION_ID_LENGTH: usize = 20;
+
+    /// The keyspace this server serves.
+    ///
+    /// Returns the shared handle rather than a lock guard so callers keep
+    /// control of when - and for how long - the storage `Mutex` is held; BLPOP
+    /// in particular must drop that lock before parking on its receiver.
+    pub fn storage(&self) -> &Arc<Mutex<Storage>> {
+        &self.storage
+    }
 
     pub fn is_master(&self) -> bool {
         self.replica_of.is_none()
@@ -84,6 +99,7 @@ impl ServerState {
 
     pub fn new<'a>(replica_of: Option<String>, port: usize) -> ServerState {
         let blocking = Arc::new(BlockingNotifier::new());
+        let storage = Arc::new(Mutex::new(Storage::new(HashMap::new())));
         match replica_of {
             Some(replica_of) =>
                 ServerState {
@@ -93,6 +109,7 @@ impl ServerState {
                     master_replication_offset: None,
                     replica_connections: Arc::new(Mutex::new(Vec::new())),
                     blocking_notifier: blocking,
+                    storage,
                 },
             None =>
                 ServerState {
@@ -102,6 +119,7 @@ impl ServerState {
                     master_replication_offset: Some(0),
                     replica_connections: Arc::new(Mutex::new(Vec::new())),
                     blocking_notifier: blocking,
+                    storage,
                 }
         }
     }

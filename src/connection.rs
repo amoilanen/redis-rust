@@ -27,15 +27,13 @@ use crate::server_state::ServerState;
 ///
 /// # Arguments
 /// * `stream` - TCP stream for the client connection
-/// * `storage` - Shared storage for Redis data
-/// * `server_state` - Server state (master/replica info)
+/// * `server_state` - Server state (master/replica info, and the keyspace)
 /// * `should_reply` - Whether to send responses to this client (false for replicas during initial sync)
 ///
 /// # Returns
 /// Error if connection fails
 pub fn handle_connection(
     stream: &mut TcpStream,
-    storage: &Arc<Mutex<Storage>>,
     server_state: &Arc<ServerState>,
     should_reply: bool,
 ) -> Result<(), anyhow::Error> {
@@ -57,14 +55,13 @@ pub fn handle_connection(
                     handle_command(
                         stream,
                         &received_message,
-                        storage,
                         server_state,
                         &transaction,
                         should_reply,
                     )?;
                 }
                 DataType::Rdb { value } => {
-                    handle_rdb_snapshot(value, storage)?;
+                    handle_rdb_snapshot(value, server_state.storage())?;
                 }
                 DataType::SimpleString { value: _ } => {
                     handle_simple_string(&received_message)?;
@@ -78,7 +75,6 @@ pub fn handle_connection(
 fn handle_command(
     stream: &mut TcpStream,
     received_message: &DataType,
-    storage: &Arc<Mutex<Storage>>,
     server_state: &Arc<ServerState>,
     transaction: &Arc<TransactionSlot>,
     should_reply: bool,
@@ -109,7 +105,7 @@ fn handle_command(
         server_state.register_replica(stream)?;
     }
 
-    let reply = match command.execute(storage) {
+    let reply = match command.execute(server_state.storage()) {
         Ok(reply) => reply,
         // A RedisError is a client-facing error reply, not a connection failure:
         // surface it as a RESP simple error and keep serving the client. The

@@ -91,7 +91,7 @@ impl RedisCommand for Exec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::{client_error_message, command_message, create_test_storage};
+    use crate::commands::{client_error_message, command_message};
 
     fn exec(parts: &[&str], transaction: &Arc<TransactionSlot>, server_state: &Arc<ServerState>) -> Exec {
         Exec {
@@ -119,8 +119,8 @@ mod tests {
 
     #[test]
     fn test_exec_without_multi_is_a_client_error() {
-        let storage = create_test_storage();
         let state = server_state();
+        let storage = Arc::clone(state.storage());
 
         let error = exec(&["EXEC"], &no_transaction(), &state).execute(&storage).unwrap_err();
 
@@ -129,8 +129,8 @@ mod tests {
 
     #[test]
     fn test_exec_of_an_empty_transaction_replies_with_an_empty_array() -> anyhow::Result<()> {
-        let storage = create_test_storage();
         let state = server_state();
+        let storage = Arc::clone(state.storage());
 
         let result = exec(&["EXEC"], &open_transaction()?, &state).execute(&storage)?;
 
@@ -142,8 +142,8 @@ mod tests {
     #[test]
     fn test_exec_executes_single_queued_command() -> anyhow::Result<()> {
         // Running them is the next stage; ending the transaction is this one.
-        let storage = create_test_storage();
         let state = server_state();
+        let storage = Arc::clone(state.storage());
         let transaction = open_transaction()?;
         transaction.queue("SET", &command_message(&["SET", "foo", "41"]))?;
 
@@ -158,8 +158,8 @@ mod tests {
     #[test]
     fn test_exec_executes_multiple_commands() -> anyhow::Result<()> {
         // Running them is the next stage; ending the transaction is this one.
-        let storage = create_test_storage();
         let state = server_state();
+        let storage = Arc::clone(state.storage());
         let transaction = open_transaction()?;
         transaction.queue("SET", &command_message(&["SET", "x", "1"]))?;
         transaction.queue("GET", &command_message(&["GET", "x"]))?;
@@ -173,8 +173,8 @@ mod tests {
 
     #[test]
     fn test_exec_multiple_commands_one_command_fails() -> anyhow::Result<()> {
-        let storage = create_test_storage();
         let state = server_state();
+        let storage = Arc::clone(state.storage());
         let transaction = open_transaction()?;
         transaction.queue("SET", &command_message(&["SET", "x", "1"]))?;
         transaction.queue("SET", &command_message(&["SET"]))?;
@@ -188,8 +188,8 @@ mod tests {
 
     #[test]
     fn test_exec_ends_the_transaction() -> anyhow::Result<()> {
-        let storage = create_test_storage();
         let state = server_state();
+        let storage = Arc::clone(state.storage());
         let transaction = open_transaction()?;
 
         exec(&["EXEC"], &transaction, &state).execute(&storage)?;
@@ -201,8 +201,8 @@ mod tests {
 
     #[test]
     fn test_exec_only_sees_its_own_connection() -> anyhow::Result<()> {
-        let storage = create_test_storage();
         let state = server_state();
+        let storage = Arc::clone(state.storage());
         let elsewhere = open_transaction()?;
 
         let error = exec(&["EXEC"], &no_transaction(), &state).execute(&storage).unwrap_err();
@@ -214,8 +214,8 @@ mod tests {
 
     #[test]
     fn test_exec_rejects_arguments() {
-        let storage = create_test_storage();
         let state = server_state();
+        let storage = Arc::clone(state.storage());
 
         let error = exec(&["EXEC", "extra"], &no_transaction(), &state).execute(&storage).unwrap_err();
 
@@ -229,8 +229,8 @@ mod tests {
     fn test_rejected_exec_leaves_an_open_transaction_alone() -> anyhow::Result<()> {
         // Arity is checked before the slot is touched, so a malformed EXEC must
         // not consume a transaction a valid one could still run.
-        let storage = create_test_storage();
         let state = server_state();
+        let storage = Arc::clone(state.storage());
         let transaction = open_transaction()?;
 
         assert!(exec(&["EXEC", "extra"], &transaction, &state).execute(&storage).is_err());
