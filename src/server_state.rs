@@ -18,9 +18,12 @@ pub struct ServerState {
     pub replica_connections: Arc<Mutex<Vec<TcpStream>>>,
     pub blocking_notifier: Arc<BlockingNotifier>,
     /// The keyspace this server serves. Private so it is reached through
-    /// [`ServerState::storage`], which hands out a bare `Storage` handle:
-    /// commands take the keyspace alone, never the whole server state.
-    storage: Arc<Mutex<Storage>>,
+    /// [`ServerState::storage`], which hands out the bare keyspace:
+    /// commands take that alone, never the whole server state.
+    ///
+    /// Not an `Arc` - the state itself is already shared as `Arc<ServerState>`,
+    /// so a second refcount here would only ever be cloned alongside it.
+    storage: Mutex<Storage>,
 }
 
 impl ServerState {
@@ -29,10 +32,10 @@ impl ServerState {
 
     /// The keyspace this server serves.
     ///
-    /// Returns the shared handle rather than a lock guard so callers keep
-    /// control of when - and for how long - the storage `Mutex` is held; BLPOP
-    /// in particular must drop that lock before parking on its receiver.
-    pub fn storage(&self) -> &Arc<Mutex<Storage>> {
+    /// Returns the `Mutex` rather than a lock guard so callers keep control of
+    /// when - and for how long - it is held; BLPOP in particular must drop that
+    /// lock before parking on its receiver.
+    pub fn storage(&self) -> &Mutex<Storage> {
         &self.storage
     }
 
@@ -99,7 +102,7 @@ impl ServerState {
 
     pub fn new<'a>(replica_of: Option<String>, port: usize) -> ServerState {
         let blocking = Arc::new(BlockingNotifier::new());
-        let storage = Arc::new(Mutex::new(Storage::new(HashMap::new())));
+        let storage = Mutex::new(Storage::new(HashMap::new()));
         match replica_of {
             Some(replica_of) =>
                 ServerState {

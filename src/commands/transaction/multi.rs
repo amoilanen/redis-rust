@@ -26,7 +26,7 @@ pub struct Multi {
 }
 
 impl RedisCommand for Multi {
-    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, _: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         expect_no_arguments(&self.message, "multi")?;
 
         debug!("MULTI");

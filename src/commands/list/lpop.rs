@@ -18,7 +18,7 @@
 ///   `count` argument cannot be parsed as an integer, or if `count` is
 ///   negative.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use log::*;
 use crate::protocol;
 use crate::protocol::DataType;
@@ -33,7 +33,7 @@ pub struct LPop {
 }
 
 impl RedisCommand for LPop {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: "Invalid LPOP command syntax".to_string(),

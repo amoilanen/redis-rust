@@ -40,7 +40,7 @@ pub use blpop::BLPop;
 /// data type).
 fn get_list_elements(
     key: &str,
-    storage: &Arc<Mutex<Storage>>,
+    storage: &Mutex<Storage>,
 ) -> Result<Vec<DataType>> {
     let mut data = storage
         .lock()
@@ -73,7 +73,7 @@ fn get_list_elements(
 /// lock acquisition.
 fn update_list_elements<F, T>(
     key: &str,
-    storage: &Arc<Mutex<Storage>>,
+    storage: &Mutex<Storage>,
     f: F,
 ) -> Result<T>
 where
@@ -105,7 +105,7 @@ where
 /// still reports `1` even though the handoff immediately drains the list.
 fn push_to_list<F>(
     message: &DataType,
-    storage: &Arc<Mutex<Storage>>,
+    storage: &Mutex<Storage>,
     notifier: &Arc<BlockingNotifier>,
     command_name: &str,
     push_fn: F,
@@ -161,7 +161,7 @@ fn list_elements(values: &[&str]) -> Vec<DataType> {
 /// and the public command implementations can read it back.
 #[cfg(test)]
 fn set_list_values(
-    storage: &Arc<Mutex<Storage>>,
+    storage: &Mutex<Storage>,
     key: &str,
     values: &[&str],
 ) -> Result<()> {
@@ -177,7 +177,7 @@ fn set_list_values(
 /// Returns an error if the key is missing or the stored value isn't an Array.
 #[cfg(test)]
 fn read_list(
-    storage: &Arc<Mutex<Storage>>,
+    storage: &Mutex<Storage>,
     key: &str,
 ) -> Result<Vec<String>> {
     let raw = storage

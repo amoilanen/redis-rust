@@ -3,7 +3,7 @@
 /// Syntax: GET <key>
 /// Returns: The value at the key, or $-1\r\n if the key doesn't exist
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use log::*;
 use crate::protocol;
 use crate::protocol::DataType;
@@ -17,7 +17,7 @@ pub struct Get {
 }
 
 impl RedisCommand for Get {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: "GET command should have one argument".to_string(),
@@ -61,7 +61,7 @@ mod tests {
     use super::*;
     use crate::commands::{command_message, create_test_storage, set};
 
-    fn insert_test_data(storage: &Arc<Mutex<Storage>>, key: &str, value: &str) {
+    fn insert_test_data(storage: &Mutex<Storage>, key: &str, value: &str) {
         let mut data = storage.lock().unwrap();
         let _ = data.set(key, value.as_bytes().to_vec(), None);
     }

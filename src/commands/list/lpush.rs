@@ -28,7 +28,7 @@ pub struct LPush {
 }
 
 impl RedisCommand for LPush {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         push_to_list(&self.message, storage, &self.notifier, "LPUSH", |elements, value| {
             elements.insert(0, protocol::bulk_string(value));
         })

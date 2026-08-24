@@ -37,7 +37,7 @@ pub struct XRead {
 }
 
 impl RedisCommand for XRead {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: format!("ERR cannot parse 'xread' command: {}", self.message.as_string()?),
@@ -149,7 +149,7 @@ impl RedisCommand for XRead {
 /// resolved under a single storage lock, giving every stream in the request the
 /// same point-in-time snapshot.
 fn resolve_afters(
-    storage: &Arc<Mutex<Storage>>,
+    storage: &Mutex<Storage>,
     keys: &[String],
     ids: &[String],
 ) -> Result<Vec<StreamId>, anyhow::Error> {
@@ -181,7 +181,7 @@ fn resolve_afters(
 /// lock held while registering as a waiter — making the read-and-register
 /// atomic against a concurrent XADD. A non-blocking caller simply drops it.
 fn read_locked<'a>(
-    storage: &'a Arc<Mutex<Storage>>,
+    storage: &'a Mutex<Storage>,
     keys: &[String],
     afters: &[StreamId],
 ) -> Result<(MutexGuard<'a, Storage>, Vec<Vec<StreamEntry>>), anyhow::Error> {

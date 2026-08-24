@@ -19,7 +19,7 @@ pub struct PSync {
 }
 
 impl RedisCommand for PSync {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         let mut reply = Vec::new();
         let instructions: Vec<String> = self.message.as_string_vec()?;
 
@@ -83,14 +83,14 @@ mod tests {
     #[test]
     fn test_psync_returns_fullresync() {
         let server_state = Arc::new(ServerState::new(None, 6379));
-        let storage = Arc::clone(server_state.storage());
         let message = command_message(&["PSYNC", "?", "-1"]);
         let cmd = PSync {
             message,
             server_state,
         };
 
-        let result = cmd.execute(&storage).unwrap();
+        // The keyspace PSYNC snapshots is the one its own state owns.
+        let result = cmd.execute(cmd.server_state.storage()).unwrap();
 
         assert_eq!(result.len(), 2);
         let fullresync = result[0].as_string().unwrap();

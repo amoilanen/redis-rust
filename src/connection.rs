@@ -144,7 +144,7 @@ fn send_reply(stream: &mut TcpStream, reply: Vec<DataType>) -> Result<(), anyhow
 
 fn handle_rdb_snapshot(
     value: &[u8],
-    storage: &Arc<Mutex<Storage>>,
+    storage: &Mutex<Storage>,
 ) -> Result<(), anyhow::Error> {
     let maybe_received_storage = Storage::from_rdb(value).ok();
     debug!("Received storage {:?}", &maybe_received_storage);

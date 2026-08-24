@@ -22,7 +22,7 @@ pub struct ReplConf {
 }
 
 impl RedisCommand for ReplConf {
-    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, _: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         let mut reply = Vec::new();
         let instructions: Vec<String> = self.message.as_string_vec()?;
         let sub_command = instructions

@@ -18,7 +18,7 @@ pub struct Command {
 }
 
 impl RedisCommand for Command {
-    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, _: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         // TODO: Should return the list of all the available commands and their documentation instead
         Ok(vec![protocol::simple_string("OK")])
     }

@@ -28,7 +28,7 @@ pub struct Exec {
 }
 
 impl RedisCommand for Exec {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         expect_no_arguments(&self.message, "exec")?;
 
         let Some(transaction) = self.transaction.take()? else {
@@ -120,9 +120,9 @@ mod tests {
     #[test]
     fn test_exec_without_multi_is_a_client_error() {
         let state = server_state();
-        let storage = Arc::clone(state.storage());
+        let storage = state.storage();
 
-        let error = exec(&["EXEC"], &no_transaction(), &state).execute(&storage).unwrap_err();
+        let error = exec(&["EXEC"], &no_transaction(), &state).execute(storage).unwrap_err();
 
         assert_eq!(client_error_message(error), "ERR EXEC without MULTI");
     }
@@ -130,9 +130,9 @@ mod tests {
     #[test]
     fn test_exec_of_an_empty_transaction_replies_with_an_empty_array() -> anyhow::Result<()> {
         let state = server_state();
-        let storage = Arc::clone(state.storage());
+        let storage = state.storage();
 
-        let result = exec(&["EXEC"], &open_transaction()?, &state).execute(&storage)?;
+        let result = exec(&["EXEC"], &open_transaction()?, &state).execute(storage)?;
 
         assert_eq!(result, vec![protocol::array(vec![])]);
         assert_eq!(result[0].serialize(), b"*0\r\n");
@@ -143,11 +143,11 @@ mod tests {
     fn test_exec_executes_single_queued_command() -> anyhow::Result<()> {
         // Running them is the next stage; ending the transaction is this one.
         let state = server_state();
-        let storage = Arc::clone(state.storage());
+        let storage = state.storage();
         let transaction = open_transaction()?;
         transaction.queue("SET", &command_message(&["SET", "foo", "41"]))?;
 
-        let result = exec(&["EXEC"], &transaction, &state).execute(&storage)?;
+        let result = exec(&["EXEC"], &transaction, &state).execute(storage)?;
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], protocol::array(vec![protocol::simple_string("OK")]));
@@ -159,11 +159,11 @@ mod tests {
     fn test_exec_executes_multiple_commands() -> anyhow::Result<()> {
         // Running them is the next stage; ending the transaction is this one.
         let state = server_state();
-        let storage = Arc::clone(state.storage());
+        let storage = state.storage();
         let transaction = open_transaction()?;
         transaction.queue("SET", &command_message(&["SET", "x", "1"]))?;
         transaction.queue("GET", &command_message(&["GET", "x"]))?;
-        let result = exec(&["EXEC"], &transaction, &state).execute(&storage)?;
+        let result = exec(&["EXEC"], &transaction, &state).execute(storage)?;
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], protocol::array(vec![protocol::simple_string("OK"), protocol::bulk_string("1")]));
@@ -174,11 +174,11 @@ mod tests {
     #[test]
     fn test_exec_multiple_commands_one_command_fails() -> anyhow::Result<()> {
         let state = server_state();
-        let storage = Arc::clone(state.storage());
+        let storage = state.storage();
         let transaction = open_transaction()?;
         transaction.queue("SET", &command_message(&["SET", "x", "1"]))?;
         transaction.queue("SET", &command_message(&["SET"]))?;
-        let result = exec(&["EXEC"], &transaction, &state).execute(&storage)?;
+        let result = exec(&["EXEC"], &transaction, &state).execute(storage)?;
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], protocol::array(vec![protocol::simple_string("OK"), protocol::simple_error("Invalid SET command syntax")]));
@@ -189,11 +189,11 @@ mod tests {
     #[test]
     fn test_exec_ends_the_transaction() -> anyhow::Result<()> {
         let state = server_state();
-        let storage = Arc::clone(state.storage());
+        let storage = state.storage();
         let transaction = open_transaction()?;
 
-        exec(&["EXEC"], &transaction, &state).execute(&storage)?;
-        let error = exec(&["EXEC"], &transaction, &state).execute(&storage).unwrap_err();
+        exec(&["EXEC"], &transaction, &state).execute(storage)?;
+        let error = exec(&["EXEC"], &transaction, &state).execute(storage).unwrap_err();
 
         assert_eq!(client_error_message(error), "ERR EXEC without MULTI");
         Ok(())
@@ -202,10 +202,10 @@ mod tests {
     #[test]
     fn test_exec_only_sees_its_own_connection() -> anyhow::Result<()> {
         let state = server_state();
-        let storage = Arc::clone(state.storage());
+        let storage = state.storage();
         let elsewhere = open_transaction()?;
 
-        let error = exec(&["EXEC"], &no_transaction(), &state).execute(&storage).unwrap_err();
+        let error = exec(&["EXEC"], &no_transaction(), &state).execute(storage).unwrap_err();
 
         assert_eq!(client_error_message(error), "ERR EXEC without MULTI");
         assert!(elsewhere.take()?.is_some(), "the other connection lost its transaction");
@@ -215,9 +215,9 @@ mod tests {
     #[test]
     fn test_exec_rejects_arguments() {
         let state = server_state();
-        let storage = Arc::clone(state.storage());
+        let storage = state.storage();
 
-        let error = exec(&["EXEC", "extra"], &no_transaction(), &state).execute(&storage).unwrap_err();
+        let error = exec(&["EXEC", "extra"], &no_transaction(), &state).execute(storage).unwrap_err();
 
         assert_eq!(
             client_error_message(error),
@@ -230,12 +230,12 @@ mod tests {
         // Arity is checked before the slot is touched, so a malformed EXEC must
         // not consume a transaction a valid one could still run.
         let state = server_state();
-        let storage = Arc::clone(state.storage());
+        let storage = state.storage();
         let transaction = open_transaction()?;
 
-        assert!(exec(&["EXEC", "extra"], &transaction, &state).execute(&storage).is_err());
+        assert!(exec(&["EXEC", "extra"], &transaction, &state).execute(storage).is_err());
 
-        let result = exec(&["EXEC"], &transaction, &state).execute(&storage)?;
+        let result = exec(&["EXEC"], &transaction, &state).execute(storage)?;
         assert_eq!(result, vec![protocol::array(vec![])]);
         Ok(())
     }

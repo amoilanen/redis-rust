@@ -3,7 +3,7 @@
 /// Syntax: PING
 /// Returns: +PONG
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
@@ -15,7 +15,7 @@ pub struct Ping {
 }
 
 impl RedisCommand for Ping {
-    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, _: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         Ok(vec![protocol::simple_string("PONG")])
     }
 
@@ -39,16 +39,14 @@ impl RedisCommand for Ping {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::command_message;
+    use crate::commands::{command_message, create_test_storage};
 
     #[test]
     fn test_ping_command() {
         let message = command_message(&["PING"]);
         let cmd = Ping { message };
 
-        let storage = Arc::new(std::sync::Mutex::new(Storage::new(
-            std::collections::HashMap::new(),
-        )));
+        let storage = create_test_storage();
         let result = cmd.execute(&storage).unwrap();
 
         assert_eq!(result.len(), 1);

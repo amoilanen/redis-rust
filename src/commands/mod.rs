@@ -3,7 +3,7 @@
 /// This module defines the interface for Redis commands and exports
 /// all available command implementations.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 
@@ -41,7 +41,7 @@ pub use r#type::Type;
 /// All Redis commands must implement this trait to be handled by the server.
 pub trait RedisCommand {
     /// Execute the command and return response(s) to send to the client.
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error>;
+    fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error>;
 
     /// Whether this command should be propagated to replica servers.
     fn is_propagated_to_replicas(&self) -> bool;
@@ -81,19 +81,23 @@ pub fn parse_command_name(received_message: &DataType) -> Result<String, anyhow:
 // while `#[cfg(test)]` strips them from release builds entirely.
 // ---------------------------------------------------------------------------
 
-/// Build a fresh, empty `Storage` wrapped in an `Arc<Mutex<...>>` for unit tests.
+/// Build a fresh, empty `Storage` for unit tests.
+///
+/// Still an `Arc` even though `execute` now takes a bare `&Mutex<Storage>`:
+/// the BLPOP tests hand the keyspace to a second thread, and every other call
+/// site passes `&storage`, which deref-coerces to `&Mutex<Storage>`.
 #[cfg(test)]
-fn create_test_storage() -> Arc<Mutex<Storage>> {
+fn create_test_storage() -> std::sync::Arc<Mutex<Storage>> {
     use std::collections::HashMap;
-    Arc::new(Mutex::new(Storage::new(HashMap::new())))
+    std::sync::Arc::new(Mutex::new(Storage::new(HashMap::new())))
 }
 
 /// Build a fresh `BlockingNotifier` for the commands that take one (RPUSH,
 /// LPUSH, BLPOP, XADD, XREAD). Tests that never block still need one to
 /// construct the command.
 #[cfg(test)]
-fn create_test_notifier() -> Arc<crate::blocking::BlockingNotifier> {
-    Arc::new(crate::blocking::BlockingNotifier::new())
+fn create_test_notifier() -> std::sync::Arc<crate::blocking::BlockingNotifier> {
+    std::sync::Arc::new(crate::blocking::BlockingNotifier::new())
 }
 
 /// Build a RESP command message - an Array of bulk strings - from its parts.

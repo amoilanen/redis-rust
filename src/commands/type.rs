@@ -4,7 +4,7 @@
 /// Returns: a simple string naming the type (`string`, `list`, ...), or
 /// `none` if the key does not exist.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use log::*;
 use crate::protocol;
 use crate::protocol::DataType;
@@ -18,7 +18,7 @@ pub struct Type {
 }
 
 impl RedisCommand for Type {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: "Invalid TYPE command syntax".to_string(),
@@ -70,6 +70,7 @@ impl RedisCommand for Type {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use crate::commands::{command_message, create_test_storage, set};
     use crate::commands::list::RPush;
     use crate::blocking::BlockingNotifier;

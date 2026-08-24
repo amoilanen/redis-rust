@@ -3,7 +3,7 @@
 /// Syntax: ECHO <message>
 /// Returns: The message back to the client
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 use super::RedisCommand;
@@ -14,7 +14,7 @@ pub struct Echo {
 }
 
 impl RedisCommand for Echo {
-    fn execute(&self, _: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, _: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         let elements = self.message.as_vec()?;
         let argument = elements.get(1);
         let mut reply: Vec<DataType> = Vec::new();
@@ -44,7 +44,7 @@ impl RedisCommand for Echo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::command_message;
+    use crate::commands::{command_message, create_test_storage};
     use crate::protocol;
 
     #[test]
@@ -59,9 +59,7 @@ mod tests {
             message
         };
 
-        let storage = Arc::new(std::sync::Mutex::new(Storage::new(
-            std::collections::HashMap::new(),
-        )));
+        let storage = create_test_storage();
         let result = cmd.execute(&storage).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -75,9 +73,7 @@ mod tests {
             message
         };
 
-        let storage = Arc::new(std::sync::Mutex::new(Storage::new(
-            std::collections::HashMap::new(),
-        )));
+        let storage = create_test_storage();
         let result = cmd.execute(&storage).unwrap();
 
         assert_eq!(result.len(), 0);

@@ -6,7 +6,7 @@
 ///
 /// Returns: +OK on success
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use anyhow::anyhow;
 use log::*;
 use crate::protocol;
@@ -21,7 +21,7 @@ pub struct Set {
 }
 
 impl RedisCommand for Set {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: "Invalid SET command syntax".to_string(),

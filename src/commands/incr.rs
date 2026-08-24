@@ -6,7 +6,7 @@
 /// A missing key is created holding `1`. Rejecting non-numeric values with the
 /// Redis-accurate error comes in a later stage.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use log::*;
 use crate::protocol;
 use crate::protocol::DataType;
@@ -20,7 +20,7 @@ pub struct Incr {
 }
 
 impl RedisCommand for Incr {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: format!("Invalid INCR command syntax: '{}'", instructions.join(" ")).to_string(),
@@ -72,7 +72,7 @@ mod tests {
 
     /// Absolute expiry deadline (ms since epoch) currently recorded for `key`,
     /// or `None` when the key has no TTL. Panics if the key is missing.
-    fn expires_at_ms(storage: &Arc<Mutex<Storage>>, key: &str) -> Option<u64> {
+    fn expires_at_ms(storage: &Mutex<Storage>, key: &str) -> Option<u64> {
         storage
             .lock()
             .unwrap()

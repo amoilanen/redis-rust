@@ -8,7 +8,7 @@
 /// the entry ID (bulk string) and an array of its field/value pairs (bulk
 /// strings) in insertion order.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use anyhow::anyhow;
 use log::*;
@@ -26,7 +26,7 @@ pub struct XRange {
 }
 
 impl RedisCommand for XRange {
-    fn execute(&self, storage: &Arc<Mutex<Storage>>) -> Result<Vec<DataType>, anyhow::Error> {
+    fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         let instructions: Vec<String> = self.message.as_string_vec()?;
         let error = RedisError {
             message: "ERR wrong number of arguments for 'xrange' command".to_string(),
