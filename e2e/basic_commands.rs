@@ -6,7 +6,7 @@
 mod common;
 
 use anyhow::Result;
-use common::{free_port, ServerProcess};
+use common::{find_free_port, ServerProcess};
 use std::thread;
 use std::time::Duration;
 
@@ -14,7 +14,7 @@ use std::time::Duration;
 
 #[test]
 fn test_ping_returns_pong() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -25,7 +25,7 @@ fn test_ping_returns_pong() -> Result<()> {
 
 #[test]
 fn test_multiple_pings() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -40,7 +40,7 @@ fn test_multiple_pings() -> Result<()> {
 
 #[test]
 fn test_echo_simple() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -51,7 +51,7 @@ fn test_echo_simple() -> Result<()> {
 
 #[test]
 fn test_echo_empty_string() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -62,7 +62,7 @@ fn test_echo_empty_string() -> Result<()> {
 
 #[test]
 fn test_echo_special_characters() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -75,7 +75,7 @@ fn test_echo_special_characters() -> Result<()> {
 
 #[test]
 fn test_set_returns_ok() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -86,7 +86,7 @@ fn test_set_returns_ok() -> Result<()> {
 
 #[test]
 fn test_get_existing_key() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -98,7 +98,7 @@ fn test_get_existing_key() -> Result<()> {
 
 #[test]
 fn test_get_nonexistent_key() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -109,7 +109,7 @@ fn test_get_nonexistent_key() -> Result<()> {
 
 #[test]
 fn test_set_overwrites_value() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -122,7 +122,7 @@ fn test_set_overwrites_value() -> Result<()> {
 
 #[test]
 fn test_multiple_keys() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -142,7 +142,7 @@ fn test_multiple_keys() -> Result<()> {
 
 #[test]
 fn test_numeric_values() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -154,7 +154,7 @@ fn test_numeric_values() -> Result<()> {
 
 #[test]
 fn test_value_with_spaces() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -166,7 +166,7 @@ fn test_value_with_spaces() -> Result<()> {
 
 #[test]
 fn test_large_value() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -182,7 +182,7 @@ fn test_large_value() -> Result<()> {
 
 #[test]
 fn test_key_exists_before_expiry() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -194,7 +194,7 @@ fn test_key_exists_before_expiry() -> Result<()> {
 
 #[test]
 fn test_key_expires_after_timeout() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -214,7 +214,7 @@ fn test_key_expires_after_timeout() -> Result<()> {
 
 #[test]
 fn test_set_without_expiry_persists() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -231,7 +231,7 @@ fn test_set_without_expiry_persists() -> Result<()> {
 fn test_incr_on_existing_numeric_key() -> Result<()> {
     // Wire-level behaviour: INCR must reply with a RESP integer (`:42\r\n`),
     // which the test client surfaces as the bare number.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -242,7 +242,7 @@ fn test_incr_on_existing_numeric_key() -> Result<()> {
 
 #[test]
 fn test_incr_repeated_and_visible_to_get() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -257,7 +257,7 @@ fn test_incr_repeated_and_visible_to_get() -> Result<()> {
 fn test_incr_on_missing_key_starts_at_one() -> Result<()> {
     // Each never-before-seen key gets its own counter starting at 1, and the
     // created value is a normal string that GET can read back.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -272,7 +272,7 @@ fn test_incr_on_missing_key_starts_at_one() -> Result<()> {
 fn test_incr_on_non_numeric_value_errors() -> Result<()> {
     // Wire-level behaviour: the client gets `-ERR value is not an integer or
     // out of range\r\n`, the value survives, and the connection stays usable.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -291,7 +291,7 @@ fn test_incr_on_non_numeric_value_errors() -> Result<()> {
 #[test]
 fn test_multi_replies_ok() -> Result<()> {
     // Wire-level behaviour: `MULTI` is acknowledged with `+OK\r\n`.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -303,7 +303,7 @@ fn test_multi_replies_ok() -> Result<()> {
 fn test_commands_after_multi_are_queued() -> Result<()> {
     // The tester's sequence: every command after MULTI is acknowledged with
     // `+QUEUED\r\n` instead of its own reply.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -318,7 +318,7 @@ fn test_commands_after_multi_are_queued() -> Result<()> {
 fn test_queued_commands_do_not_touch_the_database() -> Result<()> {
     // A second connection is how the tester checks that the queued SET never
     // ran: `foo` must still be missing.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut queueing_client = server.client();
     let mut observer = server.client();
@@ -335,7 +335,7 @@ fn test_queued_commands_do_not_touch_the_database() -> Result<()> {
 fn test_queueing_reads_does_not_run_them_either() -> Result<()> {
     // Even a read replies `+QUEUED`, so the value seeded before MULTI is not
     // reported back until the transaction runs.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -348,7 +348,7 @@ fn test_queueing_reads_does_not_run_them_either() -> Result<()> {
 
 #[test]
 fn test_queueing_only_affects_the_connection_that_sent_multi() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut queueing_client = server.client();
     let mut other_client = server.client();
@@ -363,7 +363,7 @@ fn test_queueing_only_affects_the_connection_that_sent_multi() -> Result<()> {
 
 #[test]
 fn test_a_queued_transaction_dies_with_its_connection() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
 
     let mut abandoning_client = server.client();
@@ -381,7 +381,7 @@ fn test_a_queued_transaction_dies_with_its_connection() -> Result<()> {
 fn test_unknown_commands_are_still_ignored_while_queueing() -> Result<()> {
     // An unrecognised command gets no reply at all, in or out of a transaction,
     // so the connection stays usable for the commands that follow it.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -396,7 +396,7 @@ fn test_unknown_commands_are_still_ignored_while_queueing() -> Result<()> {
 fn test_nested_multi_is_accepted_for_now() -> Result<()> {
     // Real Redis replies `ERR MULTI calls can not be nested`. Until that lands,
     // the second MULTI replaces the first transaction and one EXEC ends both.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -413,7 +413,7 @@ fn test_nested_multi_is_accepted_for_now() -> Result<()> {
 
 #[test]
 fn test_exec_without_multi_errors() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -425,7 +425,7 @@ fn test_exec_without_multi_errors() -> Result<()> {
 #[test]
 fn test_exec_error_leaves_the_connection_usable() -> Result<()> {
     // A rejected EXEC is an error reply, not a connection failure.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -441,7 +441,7 @@ fn test_exec_error_leaves_the_connection_usable() -> Result<()> {
 #[test]
 fn test_exec_after_multi_on_another_connection_still_errors() -> Result<()> {
     // B's failed EXEC must also leave A's transaction intact.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client_a = server.client();
     let mut client_b = server.client();
@@ -457,7 +457,7 @@ fn test_exec_after_multi_on_another_connection_still_errors() -> Result<()> {
 
 #[test]
 fn test_exec_after_multi_replies_with_an_empty_array() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -473,7 +473,7 @@ fn test_exec_after_multi_replies_with_an_empty_array() -> Result<()> {
 fn test_exec_executes_single_queued_command() -> Result<()> {
     // Running the queue is the next stage: for now EXEC only ends the
     // transaction, so the queued SET never reaches the database.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -487,7 +487,7 @@ fn test_exec_executes_single_queued_command() -> Result<()> {
 
 #[test]
 fn test_commands_run_again_once_exec_has_ended_the_transaction() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -502,7 +502,7 @@ fn test_commands_run_again_once_exec_has_ended_the_transaction() -> Result<()> {
 
 #[test]
 fn test_several_commands_in_transaction() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -519,7 +519,7 @@ fn test_several_commands_in_transaction() -> Result<()> {
 
 #[test]
 fn test_transactions_can_be_repeated_on_one_connection() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -532,7 +532,7 @@ fn test_transactions_can_be_repeated_on_one_connection() -> Result<()> {
 
 #[test]
 fn test_an_open_transaction_does_not_outlive_its_connection() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
 
     let mut abandoning_client = server.client();
@@ -549,7 +549,7 @@ fn test_an_open_transaction_does_not_outlive_its_connection() -> Result<()> {
 
 #[test]
 fn test_discard_without_multi_errors() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -561,7 +561,7 @@ fn test_discard_without_multi_errors() -> Result<()> {
 #[test]
 fn test_discard_error_leaves_the_connection_usable() -> Result<()> {
     // A rejected EXEC is an error reply, not a connection failure.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -577,7 +577,7 @@ fn test_discard_error_leaves_the_connection_usable() -> Result<()> {
 #[test]
 fn test_discard_after_multi_on_another_connection_still_errors() -> Result<()> {
     // B's failed EXEC must also leave A's transaction intact.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client_a = server.client();
     let mut client_b = server.client();
@@ -593,7 +593,7 @@ fn test_discard_after_multi_on_another_connection_still_errors() -> Result<()> {
 
 #[test]
 fn test_discard_discards_active_transaction() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -608,7 +608,7 @@ fn test_discard_discards_active_transaction() -> Result<()> {
 
 #[test]
 fn test_transaction_can_be_restarted_after_discard() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -627,7 +627,7 @@ fn test_transaction_can_be_restarted_after_discard() -> Result<()> {
 
 #[test]
 fn test_info_replication_master() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -654,7 +654,7 @@ fn test_info_replication_master() -> Result<()> {
 
 #[test]
 fn test_command_responds() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -667,7 +667,7 @@ fn test_command_responds() -> Result<()> {
 
 #[test]
 fn test_multiple_clients_independent_operations() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
 
     let mut client_a = server.client();
@@ -687,7 +687,7 @@ fn test_multiple_clients_independent_operations() -> Result<()> {
 
 #[test]
 fn test_concurrent_writes_to_same_key() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
 
     let mut client_a = server.client();

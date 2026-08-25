@@ -6,11 +6,11 @@
 mod common;
 
 use anyhow::Result;
-use common::{free_port, ServerProcess};
+use common::{find_free_port, ServerProcess};
 
 #[test]
 fn test_xadd_returns_entry_id_as_bulk_string() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -21,7 +21,7 @@ fn test_xadd_returns_entry_id_as_bulk_string() -> Result<()> {
 
 #[test]
 fn test_xadd_with_multiple_field_value_pairs() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -34,7 +34,7 @@ fn test_xadd_with_multiple_field_value_pairs() -> Result<()> {
 
 #[test]
 fn test_xadd_appends_to_existing_stream() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -45,7 +45,7 @@ fn test_xadd_appends_to_existing_stream() -> Result<()> {
 
 #[test]
 fn test_xadd_auto_generated_sequence_id() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -56,7 +56,7 @@ fn test_xadd_auto_generated_sequence_id() -> Result<()> {
 
 #[test]
 fn test_xadd_rejects_invalid_id() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -79,7 +79,7 @@ fn test_xadd_rejects_invalid_id() -> Result<()> {
 
 #[test]
 fn test_xrange_returns_entries_in_range() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -96,7 +96,7 @@ fn test_xrange_returns_entries_in_range() -> Result<()> {
 
 #[test]
 fn test_xrange_omitted_sequence_numbers() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -112,7 +112,7 @@ fn test_xrange_omitted_sequence_numbers() -> Result<()> {
 
 #[test]
 fn test_xread_returns_entries_after_id_exclusive() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -128,7 +128,7 @@ fn test_xread_returns_entries_after_id_exclusive() -> Result<()> {
 
 #[test]
 fn test_type_of_stream_key() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -139,7 +139,7 @@ fn test_type_of_stream_key() -> Result<()> {
 
 #[test]
 fn test_type_distinguishes_stream_from_string_and_none() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -154,7 +154,7 @@ fn test_type_distinguishes_stream_from_string_and_none() -> Result<()> {
 
 #[test]
 fn test_type_reflects_overwrite_from_stream_to_string() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 

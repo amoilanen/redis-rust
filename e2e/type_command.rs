@@ -4,11 +4,11 @@
 mod common;
 
 use anyhow::Result;
-use common::{free_port, ServerProcess};
+use common::{find_free_port, ServerProcess};
 
 #[test]
 fn test_type_of_string_key() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -20,7 +20,7 @@ fn test_type_of_string_key() -> Result<()> {
 
 #[test]
 fn test_type_of_missing_key_is_none() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -31,7 +31,7 @@ fn test_type_of_missing_key_is_none() -> Result<()> {
 
 #[test]
 fn test_type_of_list_key() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -43,7 +43,7 @@ fn test_type_of_list_key() -> Result<()> {
 
 #[test]
 fn test_type_reflects_overwrite_from_list_to_string() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -57,14 +57,16 @@ fn test_type_reflects_overwrite_from_list_to_string() -> Result<()> {
 
 #[test]
 fn test_type_of_expired_key_is_none() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
+    client.send_command(&["SET", "long_lived", "value", "px", "60000"])?;
     client.send_command(&["SET", "ephemeral", "value", "px", "100"])?;
-    assert_eq!(client.send_command(&["TYPE", "ephemeral"])?, "string");
 
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert_eq!(client.send_command(&["TYPE", "long_lived"])?, "string");
+
+    std::thread::sleep(std::time::Duration::from_millis(300));
 
     assert_eq!(client.send_command(&["TYPE", "ephemeral"])?, "none");
     Ok(())

@@ -12,7 +12,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Result;
-use common::{free_port, ServerProcess};
+use common::{find_free_port, ServerProcess};
 
 // ========================= RPUSH =========================
 
@@ -20,7 +20,7 @@ use common::{free_port, ServerProcess};
 fn test_rpush_returns_new_length_as_integer() -> Result<()> {
     // Validates the wire encoding for RPUSH: it must reply with a RESP
     // integer (`:N\r\n`), which the test client surfaces as the bare number.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -31,7 +31,7 @@ fn test_rpush_returns_new_length_as_integer() -> Result<()> {
 
 #[test]
 fn test_rpush_repeated_calls_grow_the_list() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -49,7 +49,7 @@ fn test_rpush_repeated_calls_grow_the_list() -> Result<()> {
 
 #[test]
 fn test_lpush_returns_new_length_as_integer() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -63,7 +63,7 @@ fn test_lpush_inserts_in_reverse_order() -> Result<()> {
     // The trickiest LPUSH semantic: each value is independently inserted at
     // the head, so "a", "b", "c" -> ["c", "b", "a"]. This is the most
     // common bug surface and is worth proving over the wire.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -77,7 +77,7 @@ fn test_lpush_inserts_in_reverse_order() -> Result<()> {
 
 #[test]
 fn test_rpush_and_lpush_combined_produce_expected_order() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -98,7 +98,7 @@ fn test_rpush_and_lpush_combined_produce_expected_order() -> Result<()> {
 
 #[test]
 fn test_lrange_full_range_via_negative_one() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -111,7 +111,7 @@ fn test_lrange_full_range_via_negative_one() -> Result<()> {
 
 #[test]
 fn test_lrange_negative_indices_count_from_end() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -125,7 +125,7 @@ fn test_lrange_negative_indices_count_from_end() -> Result<()> {
 
 #[test]
 fn test_lrange_clamps_out_of_range_stop() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -142,7 +142,7 @@ fn test_lrange_on_nonexistent_key_returns_empty_array() -> Result<()> {
     // Wire-level behaviour: LRANGE on a key that was never created must
     // reply with an empty RESP array (`*0\r\n`), not a nil or an error.
     // The test client surfaces an empty array as an empty string.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -157,7 +157,7 @@ fn test_lrange_on_nonexistent_key_returns_empty_array() -> Result<()> {
 fn test_llen_returns_length_of_existing_list() -> Result<()> {
     // Validates the wire encoding for LLEN: it must reply with a RESP
     // integer (`:N\r\n`), which the test client surfaces as the bare number.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -174,7 +174,7 @@ fn test_llen_returns_length_of_existing_list() -> Result<()> {
 fn test_llen_on_nonexistent_key_returns_zero() -> Result<()> {
     // Wire-level behaviour: LLEN on a key that was never created must
     // reply with a RESP integer 0 (`:0\r\n`).
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -190,7 +190,7 @@ fn test_lpop_removes_and_returns_head_as_bulk_string() -> Result<()> {
     // Validates the wire encoding for LPOP: it must reply with a RESP bulk
     // string (`$3\r\none\r\n`), which the test client surfaces as the bare
     // payload. Exactly mirrors the example from the task description.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -213,7 +213,7 @@ fn test_lpop_on_nonexistent_key_returns_nil() -> Result<()> {
     // Wire-level behaviour: LPOP on a key that was never created must reply
     // with a null bulk string (`$-1\r\n`). The test client surfaces null
     // bulk strings as the literal "(nil)".
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -226,7 +226,7 @@ fn test_lpop_on_nonexistent_key_returns_nil() -> Result<()> {
 fn test_lpop_drains_list_then_returns_nil() -> Result<()> {
     // Drain a two-element list one element at a time, then confirm a third
     // LPOP on the now-empty key returns a null bulk string.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -245,7 +245,7 @@ fn test_lpop_with_count_returns_array_of_removed_elements() -> Result<()> {
     // Validates the wire encoding for `LPOP key count`: the response is a
     // RESP array (`*N\r\n...`) of bulk strings in the order they were
     // removed. Mirrors the example from the task description verbatim.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -267,7 +267,7 @@ fn test_lpop_with_count_returns_array_of_removed_elements() -> Result<()> {
 fn test_lpop_with_count_greater_than_length_drains_list() -> Result<()> {
     // When `count` exceeds the list length the command removes everything
     // and returns an array of all popped elements; the list is now empty.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -286,7 +286,7 @@ fn test_lpop_with_count_greater_than_length_drains_list() -> Result<()> {
 fn test_lpop_with_count_zero_returns_empty_array() -> Result<()> {
     // `LPOP key 0` is a no-op that still has to reply with an empty RESP
     // array (`*0\r\n`), surfaced as an empty string by the test client.
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -305,7 +305,7 @@ fn test_lpop_with_count_zero_returns_empty_array() -> Result<()> {
 
 #[test]
 fn test_blpop_returns_immediately_when_list_non_empty() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
     let mut client = server.client();
 
@@ -318,7 +318,7 @@ fn test_blpop_returns_immediately_when_list_non_empty() -> Result<()> {
 
 #[test]
 fn test_blpop_blocks_until_rpush_wakes_it() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
 
     let mut waiter = server.client();
@@ -343,7 +343,7 @@ fn test_blpop_blocks_until_rpush_wakes_it() -> Result<()> {
 
 #[test]
 fn test_blpop_serves_multiple_clients_in_fifo_order() -> Result<()> {
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
 
     let mut waiter_a = server.client();
@@ -377,7 +377,7 @@ fn test_blpop_serves_multiple_clients_in_fifo_order() -> Result<()> {
 fn test_two_clients_share_the_same_list() -> Result<()> {
     // One client writes, another reads — verifies that the list lives in
     // shared storage across separate TCP connections (not per-connection).
-    let port = free_port();
+    let port = find_free_port();
     let server = ServerProcess::start_master(port);
 
     let mut writer = server.client();
