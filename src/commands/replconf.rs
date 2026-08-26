@@ -37,7 +37,7 @@ impl RedisCommand for ReplConf {
                 protocol::bulk_string("0"),
             ]));
         } else {
-            reply.push(protocol::bulk_string("OK"));
+            reply.push(protocol::simple_string("OK"));
         }
 
         Ok(reply)
