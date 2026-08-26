@@ -3,10 +3,6 @@
 /// Syntax: EXEC
 /// Returns: an array of the queued commands' replies, or
 ///          `-ERR EXEC without MULTI` when no transaction is open.
-///
-/// Running the queued commands is a later stage: for now EXEC ends the
-/// transaction and discards them, always replying `*0\r\n` - which Redis treats
-/// as a successful run of a transaction that had nothing in it, not as an error.
 
 use std::sync::{Arc, Mutex};
 use std::convert::identity;
@@ -141,7 +137,6 @@ mod tests {
 
     #[test]
     fn test_exec_executes_single_queued_command() -> anyhow::Result<()> {
-        // Running them is the next stage; ending the transaction is this one.
         let state = server_state();
         let storage = state.storage();
         let transaction = open_transaction()?;
@@ -157,7 +152,6 @@ mod tests {
 
     #[test]
     fn test_exec_executes_multiple_commands() -> anyhow::Result<()> {
-        // Running them is the next stage; ending the transaction is this one.
         let state = server_state();
         let storage = state.storage();
         let transaction = open_transaction()?;

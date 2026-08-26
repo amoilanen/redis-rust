@@ -2,11 +2,7 @@
 ///
 /// Syntax: DISCARD
 /// Returns: OK, if there is an active transaction, error if there is no active transaction
-///          `-ERR EXEC without MULTI` when no transaction is open.
-///
-/// Running the queued commands is a later stage: for now EXEC ends the
-/// transaction and discards them, always replying `*0\r\n` - which Redis treats
-/// as a successful run of a transaction that had nothing in it, not as an error.
+///          `-ERR DISCARD without MULTI` when no transaction is open.
 
 use std::sync::{Arc, Mutex};
 
@@ -28,7 +24,6 @@ impl RedisCommand for Discard {
     fn execute(&self, _: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         expect_no_arguments(&self.message, "discard")?;
 
-        // Transaction is taken out - there is no more transaction left if there was one
         let Some(_) = self.transaction.take()? else {
             debug!("DISCARD without MULTI");
             return Err(RedisError {
