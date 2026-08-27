@@ -6,7 +6,7 @@ use std::time::Duration;
 use log::*;
 
 use codecrafters_redis::cli;
-use codecrafters_redis::connection;
+use codecrafters_redis::connection::{self, ConnectionMode};
 use codecrafters_redis::replication;
 use codecrafters_redis::server_state::ServerState;
 
@@ -46,7 +46,9 @@ fn main() -> Result<(), anyhow::Error> {
 
         // Handle connection in a separate thread
         thread::spawn(move || {
-            if let Err(e) = connection::handle_connection(&mut stream, &server_state, true) {
+            if let Err(e) =
+                connection::handle_connection(&mut stream, &server_state, ConnectionMode::ConnectedClient)
+            {
                 error!("Connection handler error: {}", e);
             }
         });

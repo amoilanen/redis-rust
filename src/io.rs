@@ -11,8 +11,19 @@ use crate::protocol::DataType;
 const BUFFER_SIZE: usize = 2048;
 
 pub fn read_messages<R: Read>(reader: &mut R) -> Result<Vec<DataType>, anyhow::Error> {
+    Ok(read_messages_with_lengths(reader)?
+        .into_iter()
+        .map(|(message, _)| message)
+        .collect())
+}
+
+/// Reads the next messages, pairing each with the number of bytes it occupied
+/// on the wire - the unit a replica counts its replication offset in.
+pub fn read_messages_with_lengths<R: Read>(
+    reader: &mut R,
+) -> Result<Vec<(DataType, usize)>, anyhow::Error> {
     if let Some(message_bytes) = read_bytes(reader)? {
-        Ok(protocol::read_messages_from_bytes(&message_bytes)?)
+        protocol::read_messages_from_bytes_with_lengths(&message_bytes)
     } else {
         Ok(Vec::new())
     }
@@ -153,6 +164,22 @@ mod tests {
 
         let msgs = read_messages(&mut cursor)?;
         assert!(msgs.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_messages_with_lengths_reports_wire_sizes() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let ping = b"*1\r\n$4\r\nPING\r\n";
+        let set = b"*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$1\r\n1\r\n";
+        let mut cursor = Cursor::new([ping.as_slice(), set.as_slice()].concat());
+
+        let messages = read_messages_with_lengths(&mut cursor)?;
+
+        assert_eq!(
+            messages.iter().map(|(_, length)| *length).collect::<Vec<_>>(),
+            vec![ping.len(), set.len()]
+        );
         Ok(())
     }
 }

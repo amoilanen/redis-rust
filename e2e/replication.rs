@@ -6,8 +6,15 @@
 mod common;
 
 use anyhow::Result;
-use common::{start_master_and_replicas, REPLICATION_PROPAGATION_WAIT};
+use common::{
+    find_free_port, start_master_and_replicas, RespClient, ServerProcess,
+    REPLICATION_PROPAGATION_WAIT,
+};
+use std::collections::HashMap;
+use std::net::TcpListener;
 use std::thread;
+
+use codecrafters_redis::storage::Storage;
 
 // ========================= Replica handshake =========================
 
@@ -268,5 +275,144 @@ fn test_master_echo_works() -> Result<()> {
 
     let resp = client.send_command(&["ECHO", "test"])?;
     assert_eq!(resp, "test");
+    Ok(())
+}
+
+// ========================= Replication offset =========================
+
+/// A stand-in master, driven by the test itself.
+///
+/// A real master never sends `REPLCONF GETACK`, so the offsets a replica
+/// acknowledges can only be checked by writing the replication stream by hand:
+/// this answers the handshake and then sends whatever the test asks it to.
+struct FakeMaster {
+    listener: TcpListener,
+    port: u16,
+}
+
+impl FakeMaster {
+    /// Binds a port and starts listening, so a replica pointed at
+    /// [`FakeMaster::port`] can connect straight away.
+    fn start() -> Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
+        Ok(Self { listener, port })
+    }
+
+    /// Accepts the replica and answers its handshake, ending in FULLRESYNC and
+    /// an empty RDB snapshot - the point from which the offset counts.
+    ///
+    /// The returned client is the master's end of the replication stream: the
+    /// two ends speak the same RESP, so driving a replica needs nothing a
+    /// client driving a server does not already do.
+    fn accept_replica(&self) -> Result<RespClient> {
+        let (stream, _) = self.listener.accept()?;
+        let mut replica = RespClient::from_stream(stream)?;
+
+        expect_command(&mut replica, &["PING"])?;
+        replica.write_raw(b"+PONG\r\n")?;
+        expect_command(&mut replica, &["REPLCONF", "listening-port"])?;
+        replica.write_raw(b"+OK\r\n")?;
+        expect_command(&mut replica, &["REPLCONF", "capa"])?;
+        replica.write_raw(b"+OK\r\n")?;
+        expect_command(&mut replica, &["PSYNC"])?;
+        replica.write_raw(b"+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n")?;
+
+        // A bulk string without the trailing \r\n, as a master sends it.
+        let snapshot = Storage::new(HashMap::new()).to_rdb()?;
+        replica.write_raw(format!("${}\r\n", snapshot.len()).as_bytes())?;
+        replica.write_raw(&snapshot)?;
+
+        Ok(replica)
+    }
+}
+
+/// Reads one command the replica sent up the replication link, checks it opens
+/// with `expected`, and returns the arguments that follow.
+///
+/// `link` is the master's end of the replication stream (see
+/// [`FakeMaster::accept_replica`]), so what it reads is what the replica sent.
+///
+/// Command names are matched the way Redis matches them, ignoring case. The
+/// caller decides how much of the command to name: everything, when only the
+/// command matters, or just the leading words whose arguments it wants back.
+fn expect_command(link: &mut RespClient, expected: &[&str]) -> Result<Vec<String>> {
+    let mut command = link.read_response_parts()?;
+    let opens_as_expected = command.len() >= expected.len()
+        && command
+            .iter()
+            .zip(expected)
+            .all(|(part, expected_part)| part.eq_ignore_ascii_case(expected_part));
+    if !opens_as_expected {
+        anyhow::bail!("expected {:?} from the replica, got {:?}", expected, command);
+    }
+    Ok(command.split_off(expected.len()))
+}
+
+/// Reads the offset out of the replica's `REPLCONF ACK <offset>` reply.
+fn read_ack(link: &mut RespClient) -> Result<usize> {
+    let arguments = expect_command(link, &["REPLCONF", "ACK"])?;
+    let offset = arguments
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("REPLCONF ACK arrived without an offset"))?;
+    Ok(offset.parse()?)
+}
+
+#[test]
+fn test_replica_acknowledges_the_bytes_it_has_processed() -> Result<()> {
+    let master = FakeMaster::start()?;
+    // The replica process. Kept alive for the test's duration but never queried
+    // directly here; the test drives it through the replication link below.
+    let _replica_server = ServerProcess::start_replica(find_free_port(), master.port);
+    // The master's end of the replication stream: writing here propagates a
+    // command *down* to the replica, exactly as a real master would.
+    let mut replication_link = master.accept_replica()?;
+
+    // Nothing has been processed yet, so the very first request acknowledges 0.
+    replication_link.write_command(&["REPLCONF", "GETACK", "*"])?;
+    assert_eq!(read_ack(&mut replication_link)?, 0);
+
+    // 37 for the GETACK just answered, plus 14 for a PING processed silently.
+    replication_link.write_command(&["PING"])?;
+    replication_link.write_command(&["REPLCONF", "GETACK", "*"])?;
+    assert_eq!(read_ack(&mut replication_link)?, 51);
+
+    // 51 + 37 for the second GETACK + 29 for each SET.
+    replication_link.write_command(&["SET", "foo", "1"])?;
+    replication_link.write_command(&["SET", "bar", "2"])?;
+    replication_link.write_command(&["REPLCONF", "GETACK", "*"])?;
+    assert_eq!(read_ack(&mut replication_link)?, 146);
+
+    Ok(())
+}
+
+#[test]
+fn test_replica_applies_the_commands_it_counts() -> Result<()> {
+    let master = FakeMaster::start()?;
+    let replica_server = ServerProcess::start_replica(find_free_port(), master.port);
+
+    // Two *different* sockets reach this replica, pointing opposite ways:
+    //   * `replication_link` is the master's end of the replication stream. The
+    //     replica dialled *out* to us during its handshake, so the test plays the
+    //     master here: writing a command propagates it *down* to the replica,
+    //     which applies it silently and answers only with `REPLCONF ACK`.
+    //   * `replica_server.client()` (below) dials *in* to the replica's own port
+    //     as an ordinary client. That front door is the only socket that answers
+    //     a GET — and the only one a plain `SET` here would be rejected on, since
+    //     a replica is read-only.
+    // The two are therefore NOT interchangeable: one pushes as the master, the
+    // other asks as a client. This test proves that a write pushed in over
+    // replication becomes visible to a front-door client.
+    let mut replication_link = master.accept_replica()?;
+
+    // Propagate a write down the replication link, as a real master would.
+    replication_link.write_command(&["SET", "counted", "value"])?;
+    // The acknowledgement proves the SET was processed, so no sleep is needed.
+    replication_link.write_command(&["REPLCONF", "GETACK", "*"])?;
+    assert_eq!(read_ack(&mut replication_link)?, 37);
+
+    // Query the replica through its front door; the propagated write is there.
+    let mut client = replica_server.client();
+    assert_eq!(client.send_command(&["GET", "counted"])?, "value");
     Ok(())
 }

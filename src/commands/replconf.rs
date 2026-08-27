@@ -30,11 +30,14 @@ impl RedisCommand for ReplConf {
             .ok_or(anyhow!("replication_id not defined in {:?}", instructions))?;
 
         if sub_command.to_lowercase() == "getack" {
-            // TODO: Implement proper offset tracking later, for now hardcoding as 0
+            // The bytes of this GETACK are not part of the answer: the
+            // connection to the master counts a command towards the offset
+            // only once it has been handled.
+            let offset = self.server_state.replication_offset();
             reply.push(protocol::array(vec![
                 protocol::bulk_string("REPLCONF"),
                 protocol::bulk_string("ACK"),
-                protocol::bulk_string("0"),
+                protocol::bulk_string(&offset.to_string()),
             ]));
         } else {
             reply.push(protocol::simple_string("OK"));
@@ -101,5 +104,27 @@ mod tests {
         assert_eq!(response[0], "REPLCONF");
         assert_eq!(response[1], "ACK");
         assert_eq!(response[2], "0");
+    }
+
+    #[test]
+    fn test_replconf_getack_reports_the_processed_offset() {
+        let server_state = Arc::new(ServerState::new(Some("localhost 6379".to_owned()), 6380));
+        // A REPLCONF GETACK * (37 bytes) and a PING (14 bytes) processed
+        // before this request.
+        let first_offset = 37;
+        let second_offset = 14;
+        server_state.advance_replication_offset(first_offset);
+        server_state.advance_replication_offset(second_offset);
+        let message = command_message(&["REPLCONF", "getack", "*"]);
+        let cmd = ReplConf {
+            message,
+            server_state,
+        };
+
+        let storage = Arc::new(Mutex::new(Storage::new(HashMap::new())));
+        let result = cmd.execute(&storage).unwrap();
+
+        let response = result[0].as_string_vec().unwrap();
+        assert_eq!(response, vec!["REPLCONF", "ACK", &(first_offset + second_offset).to_string()]);
     }
 }

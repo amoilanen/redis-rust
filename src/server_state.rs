@@ -3,6 +3,7 @@ use log::*;
 use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use rand::Rng;
 use crate::commands::RedisCommand;
@@ -24,6 +25,12 @@ pub struct ServerState {
     /// Not an `Arc` - the state itself is already shared as `Arc<ServerState>`,
     /// so a second refcount here would only ever be cloned alongside it.
     storage: Mutex<Storage>,
+    /// How many bytes of the master's command stream this replica has
+    /// processed - the offset it reports in `REPLCONF ACK`.
+    ///
+    /// Atomic rather than behind a `Mutex`: the connection to the master
+    /// advances it from its own thread while client connections read it.
+    replication_offset: AtomicUsize,
 }
 
 impl ServerState {
@@ -37,6 +44,18 @@ impl ServerState {
     /// lock before parking on its receiver.
     pub fn storage(&self) -> &Mutex<Storage> {
         &self.storage
+    }
+
+    /// Bytes of the master's command stream processed so far.
+    pub fn replication_offset(&self) -> usize {
+        self.replication_offset.load(Ordering::SeqCst)
+    }
+
+    /// Counts a command received from the master towards the replication
+    /// offset. Called once the command has been handled, so a `REPLCONF
+    /// GETACK` still reports the offset as it stood before that request.
+    pub fn advance_replication_offset(&self, bytes: usize) {
+        self.replication_offset.fetch_add(bytes, Ordering::SeqCst);
     }
 
     pub fn is_master(&self) -> bool {
@@ -113,6 +132,7 @@ impl ServerState {
                     replica_connections: Arc::new(Mutex::new(Vec::new())),
                     blocking_notifier: blocking,
                     storage,
+                    replication_offset: AtomicUsize::new(0),
                 },
             None =>
                 ServerState {
@@ -123,6 +143,7 @@ impl ServerState {
                     replica_connections: Arc::new(Mutex::new(Vec::new())),
                     blocking_notifier: blocking,
                     storage,
+                    replication_offset: AtomicUsize::new(0),
                 }
         }
     }
@@ -150,6 +171,24 @@ mod tests {
         assert_eq!(state.master_replication_offset, None);
         assert_eq!(state.master_replication_id, None);
         Ok(())
+    }
+
+    #[test]
+    fn should_start_the_replication_offset_at_zero() {
+        let state = ServerState::new(Some("localhost 6379".to_owned()), 1234);
+
+        assert_eq!(state.replication_offset(), 0);
+    }
+
+    #[test]
+    fn should_accumulate_the_replication_offset() {
+        let state = ServerState::new(Some("localhost 6379".to_owned()), 1234);
+
+        // The byte sizes of REPLCONF GETACK * and PING on the wire.
+        state.advance_replication_offset(37);
+        state.advance_replication_offset(14);
+
+        assert_eq!(state.replication_offset(), 51);
     }
 }
 

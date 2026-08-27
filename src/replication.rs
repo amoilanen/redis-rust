@@ -10,6 +10,7 @@ use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::connection::ConnectionMode;
 use crate::protocol;
 use crate::io;
 use crate::server_state::ServerState;
@@ -34,7 +35,7 @@ pub fn join_as_replica(
     perform_handshake(&mut stream, server_state.port)?;
 
     info!("Replica listening for commands from master...");
-    crate::connection::handle_connection(&mut stream, server_state, false)
+    crate::connection::handle_connection(&mut stream, server_state, ConnectionMode::ConnectedMaster)
 }
 
 fn connect_to_master(master_address: &str) -> Result<TcpStream, anyhow::Error> {

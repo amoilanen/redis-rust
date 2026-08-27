@@ -16,26 +16,51 @@ use crate::commands::{command, transaction::TransactionSlot};
 use crate::storage::Storage;
 use crate::server_state::ServerState;
 
-/// Handles a single client connection.
+/// Who is on the other end of a connection.
+///
+/// The two differ in more than whether replies are sent, so the distinction is
+/// named rather than carried as a bare `should_reply` flag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnectionMode {
+    /// A client issuing commands: every command is answered.
+    ConnectedClient,
+    /// The master this server replicates from. Its commands are applied
+    /// silently - only the ones that insist on answering, such as `REPLCONF
+    /// GETACK`, reply - and their byte sizes make up the replication offset.
+    ConnectedMaster,
+}
+
+impl ConnectionMode {
+    fn should_reply(self) -> bool {
+        matches!(self, ConnectionMode::ConnectedClient)
+    }
+
+    fn counts_replication_offset(self) -> bool {
+        matches!(self, ConnectionMode::ConnectedMaster)
+    }
+}
+
+/// Handles a single connection.
 ///
 /// This function:
-/// 1. Reads incoming messages from the client
+/// 1. Reads incoming messages from the peer
 /// 2. Parses commands
 /// 3. Executes commands
-/// 4. Sends responses back to the client
+/// 4. Sends responses back where the role calls for them
 /// 5. Propagates write commands to replicas if master
+/// 6. Counts the master's commands towards the replication offset
 ///
 /// # Arguments
-/// * `stream` - TCP stream for the client connection
+/// * `stream` - TCP stream for the connection
 /// * `server_state` - Server state (master/replica info, and the keyspace)
-/// * `should_reply` - Whether to send responses to this client (false for replicas during initial sync)
+/// * `role` - Whether the peer is a client or the master this server replicates from
 ///
 /// # Returns
 /// Error if connection fails
 pub fn handle_connection(
     stream: &mut TcpStream,
     server_state: &Arc<ServerState>,
-    should_reply: bool,
+    role: ConnectionMode,
 ) -> Result<(), anyhow::Error> {
     debug!("accepted new connection");
 
@@ -44,23 +69,25 @@ pub fn handle_connection(
     let transaction = Arc::new(TransactionSlot::new());
 
     loop {
-        let received_messages: Vec<DataType> = io::read_messages(stream)?;
-        for received_message in received_messages.into_iter() {
+        let received_messages: Vec<(DataType, usize)> = io::read_messages_with_lengths(stream)?;
+        for (received_message, message_length) in received_messages.into_iter() {
             trace!(
                 "Received: {}",
                 String::from_utf8_lossy(&received_message.serialize()).replace("\r\n", "\\r\\n")
             );
             match &received_message {
                 DataType::Array { elements: _ } => {
-                    handle_command(
-                        stream,
-                        &received_message,
-                        server_state,
-                        &transaction,
-                        should_reply,
-                    )?;
+                    handle_command(stream, &received_message, server_state, &transaction, role)?;
+                    // After handling, so a REPLCONF GETACK reports the offset
+                    // as it stood before that request - the request itself is
+                    // only counted towards the next acknowledgement.
+                    if role.counts_replication_offset() {
+                        server_state.advance_replication_offset(message_length);
+                    }
                 }
                 DataType::Rdb { value } => {
+                    // The snapshot is the starting point the offset counts
+                    // from, so its bytes are not part of the offset.
                     handle_rdb_snapshot(value, server_state.storage())?;
                 }
                 DataType::SimpleString { value: _ } => {
@@ -77,7 +104,7 @@ fn handle_command(
     received_message: &DataType,
     server_state: &Arc<ServerState>,
     transaction: &Arc<TransactionSlot>,
-    should_reply: bool,
+    role: ConnectionMode,
 ) -> Result<(), anyhow::Error> {
     let Some(command) = command::command_from_message(
         received_message,
@@ -95,7 +122,7 @@ fn handle_command(
     // something EXEC could never run.
     if transaction.queue(&command_name, received_message)? {
         debug!("Queued {} in the open transaction", command_name);
-        if should_reply {
+        if role.should_reply() {
             send_reply(stream, vec![protocol::simple_string("QUEUED")])?;
         }
         return Ok(());
@@ -112,7 +139,7 @@ fn handle_command(
         // failed write is never propagated to replicas.
         Err(error) => match error.downcast::<RedisError>() {
             Ok(redis_error) => {
-                if should_reply || command.should_always_reply() {
+                if role.should_reply() || command.should_always_reply() {
                     send_reply(stream, vec![protocol::simple_error(&redis_error.message)])?;
                 }
                 return Ok(());
@@ -121,7 +148,7 @@ fn handle_command(
         },
     };
 
-    if should_reply || command.should_always_reply() {
+    if role.should_reply() || command.should_always_reply() {
         send_reply(stream, reply)?;
     }
 

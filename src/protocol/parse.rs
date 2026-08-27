@@ -6,14 +6,29 @@ use crate::error::RedisError;
 use super::DataType;
 
 pub fn read_messages_from_bytes(message_bytes: &[u8]) -> Result<Vec<DataType>, anyhow::Error> {
-    let mut messages: Vec<DataType> = Vec::new();
+    Ok(read_messages_from_bytes_with_lengths(message_bytes)?
+        .into_iter()
+        .map(|(message, _)| message)
+        .collect())
+}
+
+/// Reads every message in `message_bytes`, pairing each with the number of
+/// bytes it occupied on the wire.
+///
+/// A replica reports its replication offset in bytes, so it needs the length
+/// the master actually sent rather than the length this server would produce
+/// by serializing the parsed message again.
+pub fn read_messages_from_bytes_with_lengths(
+    message_bytes: &[u8],
+) -> Result<Vec<(DataType, usize)>, anyhow::Error> {
+    let mut messages: Vec<(DataType, usize)> = Vec::new();
     let mut current_position = 0;
     let total_length = message_bytes.len();
 
     while current_position < total_length {
-        let (parsed, new_position) = DataType::parse(&message_bytes, current_position)?;
+        let (parsed, new_position) = DataType::parse(message_bytes, current_position)?;
+        messages.push((parsed, new_position - current_position));
         current_position = new_position;
-        messages.push(parsed);
     }
     trace!("Read messages bytes {:?}", message_bytes);
     trace!("Parsed them as messages {:?}", messages);

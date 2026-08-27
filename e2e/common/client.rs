@@ -18,7 +18,12 @@ enum RespValue {
     Array(Option<Vec<RespValue>>), // None = null (*-1)
 }
 
-/// A minimal Redis client that speaks just enough RESP2 to drive E2E tests.
+/// Whoever sends commands and reads replies over a RESP2 connection.
+///
+/// Usually a client driving a server under test, but the sides are symmetric
+/// on the wire: a test acting as the master of a replication stream sends
+/// commands to a replica and reads its acknowledgements through the same type
+/// (see [`from_stream`](Self::from_stream)).
 ///
 /// Supports:
 /// - Sending commands as RESP arrays of bulk strings
@@ -30,6 +35,9 @@ pub struct RespClient {
 }
 
 impl RespClient {
+    /// How long a read or a write is given before it is called a failure.
+    const TIMEOUT: Duration = Duration::from_secs(5);
+
     /// Connect to a server, panicking on failure.
     pub fn connect(port: u16) -> Self {
         Self::try_connect(port).unwrap_or_else(|e| {
@@ -43,8 +51,14 @@ impl RespClient {
             &format!("127.0.0.1:{}", port).parse().unwrap(),
             Duration::from_secs(2),
         )?;
-        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+        Self::from_stream(stream)
+    }
+
+    /// Speak RESP over an existing connection - one a test accepted rather than
+    /// dialled, such as a replica's connection to the master it was pointed at.
+    pub fn from_stream(stream: TcpStream) -> Result<Self, std::io::Error> {
+        stream.set_read_timeout(Some(Self::TIMEOUT))?;
+        stream.set_write_timeout(Some(Self::TIMEOUT))?;
         let writer = stream.try_clone()?;
         let reader = BufReader::new(stream);
         Ok(Self { reader, writer })
@@ -59,7 +73,16 @@ impl RespClient {
         for arg in args {
             buf.push_str(&format!("${}\r\n{}\r\n", arg.len(), arg));
         }
-        self.writer.write_all(buf.as_bytes())?;
+        self.write_raw(buf.as_bytes())
+    }
+
+    /// Write bytes verbatim.
+    ///
+    /// For framing that [`write_command`](Self::write_command) cannot express,
+    /// such as the RDB snapshot a master sends after FULLRESYNC: it is a bulk
+    /// string without the trailing `\r\n`.
+    pub fn write_raw(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+        self.writer.write_all(bytes)?;
         self.writer.flush()?;
         Ok(())
     }
@@ -100,6 +123,22 @@ impl RespClient {
     /// preserving nested array structure.
     pub fn read_response_json(&mut self) -> anyhow::Result<String> {
         resp_to_json(self.read_resp()?)
+    }
+
+    /// Read a RESP array as its elements, each rendered the way
+    /// [`read_response`](Self::read_response) renders a reply.
+    ///
+    /// Where `read_response` joins an array with commas, this keeps the
+    /// elements apart, so a caller can pick one out - the offset in a
+    /// `REPLCONF ACK <offset>`, say - without splitting a string back up.
+    pub fn read_response_parts(&mut self) -> anyhow::Result<Vec<String>> {
+        match self.read_resp()? {
+            RespValue::Array(Some(items)) => items.into_iter().map(resp_to_plain).collect(),
+            other => Err(anyhow::anyhow!(
+                "expected an array, got {:?}",
+                resp_to_plain(other)
+            )),
+        }
     }
 
     /// Parse one RESP2 frame from the stream into a [`RespValue`].
