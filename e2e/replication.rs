@@ -13,6 +13,7 @@ use common::{
 use std::collections::HashMap;
 use std::net::TcpListener;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use codecrafters_redis::storage::Storage;
 
@@ -414,5 +415,40 @@ fn test_replica_applies_the_commands_it_counts() -> Result<()> {
     // Query the replica through its front door; the propagated write is there.
     let mut client = replica_server.client();
     assert_eq!(client.send_command(&["GET", "counted"])?, "value");
+    Ok(())
+}
+
+// ========================= WAIT =========================
+
+#[test]
+fn test_wait_without_replicas_answers_zero_immediately() -> Result<()> {
+    // The tester's sequence: a master nobody replicates from is asked to wait
+    // for no replicas, so there is nothing to wait for and the generous timeout
+    // must not be spent.
+    let master = ServerProcess::start_master(find_free_port());
+    let mut client = master.client();
+
+    let started_at = Instant::now();
+    let response = client.send_command(&["WAIT", "0", "60000"])?;
+
+    assert_eq!(response, "0");
+    assert!(
+        started_at.elapsed() < Duration::from_secs(1),
+        "WAIT should answer immediately, took {:?}",
+        started_at.elapsed()
+    );
+    Ok(())
+}
+
+#[test]
+fn test_wait_reports_the_connected_replicas() -> Result<()> {
+    // Asking for more replicas than exist still reports the ones that do: the
+    // three that finished their handshake in `start_master_and_replicas`.
+    let (master, replicas) = start_master_and_replicas();
+    let mut client = master.client();
+
+    let response = client.send_command(&["WAIT", "7", "500"])?;
+
+    assert_eq!(response, replicas.len().to_string());
     Ok(())
 }

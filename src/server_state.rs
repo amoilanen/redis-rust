@@ -79,6 +79,19 @@ impl ServerState {
     }
 
 
+    /// How many replicas are currently connected to this master - the number
+    /// `WAIT` reports back.
+    ///
+    /// A replica is counted from the moment it completes `PSYNC` and is
+    /// registered by [`register_replica`](Self::register_replica).
+    pub fn replica_count(&self) -> Result<usize, anyhow::Error> {
+        Ok(self
+            .replica_connections
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock replica connections: {}", e))?
+            .len())
+    }
+
     pub fn propagate_to_replicas(
         &self,
         command: &dyn RedisCommand
@@ -171,6 +184,29 @@ mod tests {
         assert_eq!(state.master_replication_offset, None);
         assert_eq!(state.master_replication_id, None);
         Ok(())
+    }
+
+    #[test]
+    fn should_count_no_replicas_on_a_fresh_master() {
+        let state = ServerState::new(None, 1234);
+
+        assert_eq!(state.replica_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn should_count_every_registered_replica() {
+        let state = ServerState::new(None, 1234);
+        // A registered replica is just a connection the master holds on to, so
+        // any live stream stands in for one here.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+
+        for expected_count in 1..=2 {
+            let replica = TcpStream::connect(address).unwrap();
+            state.register_replica(&replica).unwrap();
+
+            assert_eq!(state.replica_count().unwrap(), expected_count);
+        }
     }
 
     #[test]

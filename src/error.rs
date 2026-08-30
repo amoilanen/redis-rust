@@ -14,6 +14,10 @@ impl RedisError {
         }
     }
 
+    pub(crate) fn not_an_integer() -> RedisError {
+        RedisError::new("ERR value is not an integer or out of range")
+    }
+
     pub(crate) fn as_protocol_error(&self) -> DataType {
         protocol::simple_error(&self.message)
     }

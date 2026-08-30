@@ -3,7 +3,9 @@
 /// This module defines the interface for Redis commands and exports
 /// all available command implementations.
 
+use std::str::FromStr;
 use std::sync::Mutex;
+use crate::error::RedisError;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 
@@ -16,6 +18,7 @@ pub mod incr;
 pub mod info;
 pub mod replconf;
 pub mod psync;
+pub mod wait;
 pub mod list;
 pub mod stream;
 pub mod transaction;
@@ -31,6 +34,7 @@ pub use incr::Incr;
 pub use info::Info;
 pub use replconf::ReplConf;
 pub use psync::PSync;
+pub use wait::Wait;
 pub use list::{RPush, LPush, LRange, LLen, LPop, BLPop};
 pub use stream::{XAdd, XRange, XRead};
 pub use transaction::{Multi, Exec, Discard};
@@ -71,6 +75,20 @@ pub fn parse_command_name(received_message: &DataType) -> Result<String, anyhow:
     let command_parts: Vec<&str> = received_message_parts.iter().map(|x| x.as_str()).collect();
     let command_name = command_parts.get(0).unwrap_or(&"").to_string();
     Ok(command_name)
+}
+
+/// Reads a command argument as a `T`, rejecting an unreadable one with `error`.
+///
+/// The point is the error: `str::parse` fails with a `ParseIntError`, which
+/// would travel as an internal failure and drop the connection, where a client
+/// that mistyped an argument should just be told so. Which wording it deserves
+/// is the caller's to decide - Redis words a bad count differently from a bad
+/// timeout - and so is the type parsed, integer or otherwise.
+pub(crate) fn parse_argument<T: FromStr>(
+    argument: &str,
+    error: RedisError,
+) -> Result<T, anyhow::Error> {
+    argument.parse().map_err(|_| error.into())
 }
 
 // ---------------------------------------------------------------------------
@@ -148,5 +166,23 @@ mod tests {
 
         let name = parse_command_name(&msg).unwrap();
         assert_eq!(name, "PING");
+    }
+
+    #[test]
+    fn test_parse_argument_reads_any_number_type() {
+        let error = || RedisError::new("ERR nope");
+
+        assert_eq!(parse_argument::<i64>("-2", error()).unwrap(), -2);
+        assert_eq!(parse_argument::<usize>("60000", error()).unwrap(), 60000);
+        assert_eq!(parse_argument::<f64>("0.5", error()).unwrap(), 0.5);
+    }
+
+    #[test]
+    fn test_parse_argument_reports_the_callers_error_to_the_client() {
+        // A client-facing RedisError, not the ParseIntError that would travel
+        // as an internal failure and take the connection down with it.
+        let error = parse_argument::<i64>("soon", RedisError::new("ERR bad timeout")).unwrap_err();
+
+        assert_eq!(client_error_message(error), "ERR bad timeout");
     }
 }

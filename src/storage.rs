@@ -252,7 +252,7 @@ impl Storage {
         let current: i64 = std::str::from_utf8(bytes)
             .ok()
             .and_then(|text| text.parse().ok())
-            .ok_or_else(|| RedisError::new("ERR value is not an integer or out of range"))?;
+            .ok_or_else(RedisError::not_an_integer)?;
 
         let incremented = current
             .checked_add(1)
