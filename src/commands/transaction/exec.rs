@@ -13,13 +13,14 @@ use super::{expect_no_arguments, TransactionSlot};
 use crate::commands::{RedisCommand, command};
 use crate::error::RedisError;
 use crate::protocol::{self, DataType};
-use crate::server_state::ServerState;
+use crate::server_state::{ReplicaSlot, ServerState};
 use crate::storage::Storage;
 
 /// EXEC command implementation.
 pub struct Exec {
     pub message: DataType,
     pub transaction: Arc<TransactionSlot>,
+    pub replica: Arc<ReplicaSlot>,
     pub server_state: Arc<ServerState>
 }
 
@@ -38,7 +39,7 @@ impl RedisCommand for Exec {
         let mut commands: Vec<Box<dyn RedisCommand>> = Vec::new();
         for received_message in transaction.queued().iter() {
             // Transaction is empty at this point (it was taken from), but it is OK to start a nested transaction on this connection if required
-            if let Some(command) = command::command_from_message(received_message, &self.server_state, &self.transaction)? {
+            if let Some(command) = command::command_from_message(received_message, &self.server_state, &self.transaction, &self.replica)? {
                 commands.push(command);
             }
         }
@@ -93,6 +94,7 @@ mod tests {
         Exec {
             message: command_message(parts),
             transaction: Arc::clone(transaction),
+            replica: Arc::new(ReplicaSlot::new()),
             server_state: Arc::clone(server_state)
         }
     }

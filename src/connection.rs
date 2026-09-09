@@ -14,7 +14,7 @@ use crate::error::RedisError;
 use crate::io;
 use crate::commands::{command, transaction::TransactionSlot};
 use crate::storage::Storage;
-use crate::server_state::ServerState;
+use crate::server_state::{ReplicaSlot, ServerState};
 
 /// Who is on the other end of a connection.
 ///
@@ -67,6 +67,9 @@ pub fn handle_connection(
     // Per-connection, not on `ServerState`: a disconnect discards any open
     // transaction, as Redis does.
     let transaction = Arc::new(TransactionSlot::new());
+    // Empty until this connection turns out to be a replica's, which a PSYNC sent by the replica
+    // decides below.
+    let replica = Arc::new(ReplicaSlot::new());
 
     loop {
         let received_messages: Vec<(DataType, usize)> = io::read_messages_with_lengths(stream)?;
@@ -77,7 +80,14 @@ pub fn handle_connection(
             );
             match &received_message {
                 DataType::Array { elements: _ } => {
-                    handle_command(stream, &received_message, server_state, &transaction, role)?;
+                    handle_command(
+                        stream,
+                        &received_message,
+                        server_state,
+                        &transaction,
+                        &replica,
+                        role,
+                    )?;
                     // After handling, so a REPLCONF GETACK reports the offset
                     // as it stood before that request - the request itself is
                     // only counted towards the next acknowledgement.
@@ -104,12 +114,14 @@ fn handle_command(
     received_message: &DataType,
     server_state: &Arc<ServerState>,
     transaction: &Arc<TransactionSlot>,
+    replica: &Arc<ReplicaSlot>,
     role: ConnectionMode,
 ) -> Result<(), anyhow::Error> {
     let Some(command) = command::command_from_message(
         received_message,
         server_state,
         transaction,
+        replica,
     )? else {
         return Ok(());
     };
@@ -129,7 +141,7 @@ fn handle_command(
     }
 
     if command_name == "PSYNC" {
-        server_state.register_replica(stream)?;
+        replica.fill(server_state.register_replica(stream)?)?;
     }
 
     let reply = match command.execute(server_state.storage()) {

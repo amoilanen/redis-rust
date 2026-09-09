@@ -10,7 +10,7 @@ use crate::storage::Storage;
 use super::RedisCommand;
 use crate::commands::{self, Echo, Ping, Set, Get, Incr, Multi, Exec, Discard, Info, ReplConf, PSync, Wait, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
 use crate::commands::transaction::TransactionSlot;
-use crate::server_state::ServerState;
+use crate::server_state::{ReplicaSlot, ServerState};
 
 /// COMMAND command implementation.
 pub struct Command {
@@ -42,13 +42,15 @@ impl RedisCommand for Command {
 
 pub(crate) fn command_from_message(received_message: &DataType,
     server_state: &Arc<ServerState>,
-    transaction: &Arc<TransactionSlot>)  -> Result<Option<Box<dyn RedisCommand>>, anyhow::Error> {
+    transaction: &Arc<TransactionSlot>,
+    replica: &Arc<ReplicaSlot>)  -> Result<Option<Box<dyn RedisCommand>>, anyhow::Error> {
     let command_name = commands::parse_command_name(received_message)?;
     Ok(build_command(
         &command_name,
         received_message,
         server_state,
         transaction,
+        replica,
     ))
 }
 
@@ -57,11 +59,13 @@ fn build_command(
     received_message: &DataType,
     server_state: &Arc<ServerState>,
     transaction: &Arc<TransactionSlot>,
+    replica: &Arc<ReplicaSlot>,
 ) -> Option<Box<dyn RedisCommand>> {
     let message = received_message.clone();
     let state = || Arc::clone(server_state);
     let notifier = || Arc::clone(&server_state.blocking_notifier);
     let transaction = || Arc::clone(transaction);
+    let replica = || Arc::clone(replica);
 
     let command: Box<dyn RedisCommand> = match command_name {
         "ECHO"     => Box::new(Echo { message }),
@@ -70,11 +74,11 @@ fn build_command(
         "GET"      => Box::new(Get { message }),
         "INCR"     => Box::new(Incr { message }),
         "MULTI"    => Box::new(Multi { message, transaction: transaction() }),
-        "EXEC"     => Box::new(Exec { message, transaction: transaction(), server_state: state() }),
+        "EXEC"     => Box::new(Exec { message, transaction: transaction(), replica: replica(), server_state: state() }),
         "DISCARD"  => Box::new(Discard { message, transaction: transaction() }),
         "COMMAND"  => Box::new(Command { message }),
         "INFO"     => Box::new(Info { message, server_state: state() }),
-        "REPLCONF" => Box::new(ReplConf { message, server_state: state() }),
+        "REPLCONF" => Box::new(ReplConf { message, server_state: state(), replica: replica() }),
         "RPUSH"    => Box::new(RPush { message, notifier: notifier() }),
         "LPUSH"    => Box::new(LPush { message, notifier: notifier() }),
         "LRANGE"   => Box::new(LRange { message }),

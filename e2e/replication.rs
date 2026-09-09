@@ -441,14 +441,108 @@ fn test_wait_without_replicas_answers_zero_immediately() -> Result<()> {
 }
 
 #[test]
-fn test_wait_reports_the_connected_replicas() -> Result<()> {
-    // Asking for more replicas than exist still reports the ones that do: the
-    // three that finished their handshake in `start_master_and_replicas`.
+fn test_wait_answers_at_once_when_nothing_has_been_written() -> Result<()> {
+    // Nothing has been propagated, so the three replicas that finished their
+    // handshake in `start_master_and_replicas` have nothing left to process:
+    // there is nothing to ask them and the timeout must not be spent.
     let (master, replicas) = start_master_and_replicas();
     let mut client = master.client();
 
+    let started_at = Instant::now();
+    let response = client.send_command(&["WAIT", "3", "60000"])?;
+
+    assert_eq!(response, replicas.len().to_string());
+    assert!(
+        started_at.elapsed() < Duration::from_secs(1),
+        "WAIT should answer immediately, took {:?}",
+        started_at.elapsed()
+    );
+    Ok(())
+}
+
+#[test]
+fn test_wait_counts_the_replicas_that_processed_a_write() -> Result<()> {
+    // The tester's sequence: a write, then a WAIT for the replicas to confirm
+    // they have it. All three answer, well inside the timeout.
+    let (master, replicas) = start_master_and_replicas();
+    let mut client = master.client();
+    client.send_command(&["SET", "foo", "123"])?;
+
+    let started_at = Instant::now();
+    let response = client.send_command(&["WAIT", "3", "2000"])?;
+
+    assert_eq!(response, replicas.len().to_string());
+    assert!(
+        started_at.elapsed() < Duration::from_millis(2000),
+        "WAIT should answer as soon as the replicas acknowledge, took {:?}",
+        started_at.elapsed()
+    );
+    Ok(())
+}
+
+#[test]
+fn test_wait_reports_fewer_replicas_than_asked_for_when_the_timeout_expires() -> Result<()> {
+    // Asking for more replicas than exist: the timeout is spent in full and
+    // the ones that did acknowledge are reported.
+    let (master, replicas) = start_master_and_replicas();
+    let mut client = master.client();
+    client.send_command(&["SET", "foo", "123"])?;
+
+    let started_at = Instant::now();
     let response = client.send_command(&["WAIT", "7", "500"])?;
 
     assert_eq!(response, replicas.len().to_string());
+    assert!(
+        started_at.elapsed() >= Duration::from_millis(500),
+        "WAIT should have waited out its timeout, took only {:?}",
+        started_at.elapsed()
+    );
+    Ok(())
+}
+
+#[test]
+fn test_wait_counts_a_replica_that_joined_after_earlier_writes() -> Result<()> {
+    // A replica joining midway counts the stream from its own snapshot, not
+    // from the master's first ever write, so its acknowledgements only line up
+    // with the master's offset once they are read relative to where it joined.
+    let master = ServerProcess::start_master(find_free_port());
+    let mut client = master.client();
+    client.send_command(&["SET", "written_before_the_replica", "1"])?;
+
+    let response = client.send_command(&["WAIT", "1", "100"])?;
+    let started_at = Instant::now();
+    assert_eq!(response, "0");
+
+    let _replica = ServerProcess::start_replica(find_free_port(), master.port);
+    thread::sleep(REPLICATION_PROPAGATION_WAIT);
+    client.send_command(&["SET", "written_after_the_replica", "2"])?;
+
+    let started_at_after_replica_joined = Instant::now();
+    let response_after_replica_joined = client.send_command(&["WAIT", "1", "2000"])?;
+    assert_eq!(response_after_replica_joined, "1");
+    assert!(
+        started_at_after_replica_joined.elapsed() < Duration::from_millis(2000),
+        "WAIT should answer as soon as the replica acknowledges, took {:?}",
+        started_at.elapsed()
+    );
+    Ok(())
+}
+
+#[test]
+fn test_wait_keeps_up_with_writes_between_rounds() -> Result<()> {
+    // Writes interleaved with WAITs, as the tester issues them: each round
+    // moves the master's offset on, so each WAIT has to ask again rather than
+    // answer from what the replicas reported last time.
+    let (master, replicas) = start_master_and_replicas();
+    let mut client = master.client();
+    let expected = replicas.len().to_string();
+
+    for round in 0..3 {
+        client.send_command(&["SET", &format!("round_{}", round), "value"])?;
+
+        let response = client.send_command(&["WAIT", "3", "2000"])?;
+
+        assert_eq!(response, expected, "round {}", round);
+    }
     Ok(())
 }
