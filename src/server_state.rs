@@ -114,13 +114,27 @@ pub struct ServerState {
     /// Atomic rather than behind a `Mutex`: the connection to the master
     /// advances it from its own thread while client connections read it.
     replication_offset: AtomicUsize,
-    /// Bytes this master has written into the replication stream - the offset
-    /// a replica has to reach to be up to date with it.
+    /// Bytes this master has written into the replication stream, the requests
+    /// for acknowledgement it sends included - the scale a replica's `REPLCONF
+    /// ACK` is measured on, since a replica counts those too.
     ///
     /// The mirror image of `replication_offset`: that one counts what this
     /// node has consumed as a replica, this one what it has produced as a
     /// master, so a node only ever moves one of the two.
-    propagated_offset: AtomicUsize,
+    stream_offset: AtomicUsize,
+    /// Where the stream stood when the last *write* went out - the point a
+    /// replica has to reach for `WAIT` to count it.
+    ///
+    /// Distinct from `stream_offset`, and the difference is the whole point: a
+    /// `REPLCONF GETACK` lengthens the stream without adding anything a replica
+    /// has to catch up *to*. Waiting for the stream offset would mean every
+    /// WAIT that asked pushed the target past the answers it was waiting for,
+    /// leaving the next one asking about bytes no replica was ever sent.
+    ///
+    /// Redis keeps this per client (`c->woff`), so a WAIT there answers for the
+    /// writes that client itself made. Holding it for the master as a whole
+    /// only ever waits for more writes, never for fewer.
+    write_offset: AtomicUsize,
     /// Wakes up whoever is waiting for replicas to catch up.
     ///
     /// The `usize` counts the acknowledgements recorded so far; the number
@@ -163,8 +177,15 @@ impl ServerState {
         !self.is_master()
     }
 
-    pub fn propagated_offset(&self) -> usize {
-        self.propagated_offset.load(Ordering::SeqCst)
+    /// Bytes written into the replication stream so far, this master's own
+    /// requests for acknowledgement included.
+    pub fn stream_offset(&self) -> usize {
+        self.stream_offset.load(Ordering::SeqCst)
+    }
+
+    /// Where the stream stood when this master last propagated a write.
+    pub fn write_offset(&self) -> usize {
+        self.write_offset.load(Ordering::SeqCst)
     }
 
     fn replica_links(&self) -> Result<MutexGuard<'_, Vec<Arc<ReplicaLink>>>, anyhow::Error> {
@@ -186,7 +207,7 @@ impl ServerState {
         &self,
         stream: &TcpStream
     ) -> Result<Arc<ReplicaLink>, anyhow::Error> {
-        let link = Arc::new(ReplicaLink::new(stream.try_clone()?, self.propagated_offset()));
+        let link = Arc::new(ReplicaLink::new(stream.try_clone()?, self.stream_offset()));
         self.replica_links()?.push(Arc::clone(&link));
         Ok(link)
     }
@@ -215,7 +236,12 @@ impl ServerState {
     ) -> Result<(), anyhow::Error> {
         let command_bytes = command.serialize();
         debug!("Propagating command to replicas: {:?}", &command_bytes);
-        self.broadcast(&command_bytes)
+        let reached = self.broadcast(&command_bytes)?;
+        // `fetch_max` rather than a plain store: concurrent writes reach the
+        // sockets in the order the broadcast lock grants them, but land here
+        // in any order at all.
+        self.write_offset.fetch_max(reached, Ordering::SeqCst);
+        Ok(())
     }
 
     /// Asks every replica how far it has got, with `REPLCONF GETACK *`.
@@ -233,18 +259,21 @@ impl ServerState {
                 protocol::bulk_string("*"),
             ])
             .serialize(),
-        )
+        )?;
+        Ok(())
     }
 
-    /// Writes `bytes` to every replica and counts them into the replication
-    /// stream's offset.
+    /// Writes `bytes` to every replica, counts them into the replication
+    /// stream and reports the offset that leaves it at.
     ///
     /// A replica whose socket has failed is dropped rather than failing the
     /// command being propagated: from the master's side a replica that cannot
     /// be written to has gone away, which is not an error of the client whose
     /// write happened to be in flight. The offset advances either way - it
     /// measures the stream, not the number of listeners.
-    fn broadcast(&self, bytes: &[u8]) -> Result<(), anyhow::Error> {
+    fn broadcast(&self, bytes: &[u8]) -> Result<usize, anyhow::Error> {
+        // Held across the send and the count alike, so concurrent broadcasts
+        // advance the offset in the order they reached the sockets.
         let mut links = self.replica_links()?;
         links.retain(|link| match link.send(bytes) {
             Ok(()) => true,
@@ -253,8 +282,7 @@ impl ServerState {
                 false
             }
         });
-        self.propagated_offset.fetch_add(bytes.len(), Ordering::SeqCst);
-        Ok(())
+        Ok(self.stream_offset.fetch_add(bytes.len(), Ordering::SeqCst) + bytes.len())
     }
 
     /// Records a `REPLCONF ACK <offset>` a replica sent back, waking anyone
@@ -291,9 +319,10 @@ impl ServerState {
         wanted: usize,
         timeout: Option<Duration>,
     ) -> Result<usize, anyhow::Error> {
-        // Everything written to the replicas so far: the point one has to have
-        // reached to hold every write a client could have seen the effect of.
-        let target_offset = self.propagated_offset();
+        // The last write to go out - pointedly not the end of the stream,
+        // which the request this method is about to send would push beyond
+        // every answer to it.
+        let target_offset = self.write_offset();
 
         let acknowledged = self.replicas_acknowledged(target_offset)?;
         if acknowledged >= wanted {
@@ -392,7 +421,8 @@ impl ServerState {
                     blocking_notifier: blocking,
                     storage,
                     replication_offset: AtomicUsize::new(0),
-                    propagated_offset: AtomicUsize::new(0),
+                    stream_offset: AtomicUsize::new(0),
+                    write_offset: AtomicUsize::new(0),
                     acknowledgements: (Mutex::new(0), Condvar::new()),
                 },
             None =>
@@ -405,7 +435,8 @@ impl ServerState {
                     blocking_notifier: blocking,
                     storage,
                     replication_offset: AtomicUsize::new(0),
-                    propagated_offset: AtomicUsize::new(0),
+                    stream_offset: AtomicUsize::new(0),
+                    write_offset: AtomicUsize::new(0),
                     acknowledgements: (Mutex::new(0), Condvar::new()),
                 }
         }
@@ -506,21 +537,25 @@ mod tests {
     }
 
     #[test]
-    fn should_start_the_propagated_offset_at_zero() {
+    fn should_start_both_master_offsets_at_zero() {
         let state = ServerState::new(None, 1234);
 
-        assert_eq!(state.propagated_offset(), 0);
+        assert_eq!(state.stream_offset(), 0);
+        assert_eq!(state.write_offset(), 0);
     }
 
     #[test]
-    fn should_count_a_request_for_acknowledgements_into_the_propagated_offset() {
+    fn should_count_a_request_for_acknowledgements_into_the_stream_but_not_the_writes() {
         // The request travels down the replication stream like any other
         // command, so the replicas' next answers have to account for it.
         let (state, _listener, _links) = master_with_replicas(1);
 
         state.request_acknowledgements().unwrap();
 
-        assert_eq!(state.propagated_offset(), GETACK_BYTES);
+        assert_eq!(state.stream_offset(), GETACK_BYTES);
+        // Nothing a replica has to catch up to: WAIT must not start waiting
+        // for the answer to its own question.
+        assert_eq!(state.write_offset(), 0);
     }
 
     #[test]
@@ -553,7 +588,7 @@ mod tests {
         state.record_acknowledgement(&link, GETACK_BYTES).unwrap();
 
         assert_eq!(link.acknowledged_offset(), 2 * GETACK_BYTES);
-        assert_eq!(state.replicas_acknowledged(state.propagated_offset()).unwrap(), 1);
+        assert_eq!(state.replicas_acknowledged(state.stream_offset()).unwrap(), 1);
     }
 
     #[test]
@@ -610,7 +645,7 @@ mod tests {
     fn should_stop_waiting_when_a_late_acknowledgement_arrives() {
         let (state, _listener, links) = master_with_replicas(1);
         state.propagate_to_replicas(&ping()).unwrap();
-        let propagated = state.propagated_offset();
+        let propagated = state.write_offset();
         let acknowledging = {
             let state = Arc::clone(&state);
             let link = Arc::clone(&links[0]);

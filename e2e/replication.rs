@@ -460,6 +460,78 @@ fn test_wait_answers_at_once_when_nothing_has_been_written() -> Result<()> {
     Ok(())
 }
 
+/// A replica that finishes the handshake and then never says another word.
+///
+/// Real replicas answer `REPLCONF GETACK`, which hides a whole class of offset
+/// bug: an answer drags them up to whatever the master is waiting for, right or
+/// wrong. The tester's replicas at this stage stay silent, so what the master
+/// waits for has to be right on its own.
+///
+/// Nothing sent down the link is ever read - not the FULLRESYNC, not the RDB,
+/// not the requests for acknowledgement. Staying silent is the whole job.
+struct SilentReplica {
+    _link: RespClient,
+}
+
+impl SilentReplica {
+    /// Completes the replication handshake against the master on `master_port`.
+    fn join(master_port: u16) -> Result<Self> {
+        let mut link = RespClient::connect(master_port);
+        assert_eq!(link.send_command(&["PING"])?, "PONG");
+        assert_eq!(
+            link.send_command(&["REPLCONF", "listening-port", "6380"])?,
+            "OK"
+        );
+        assert_eq!(link.send_command(&["REPLCONF", "capa", "psync2"])?, "OK");
+        link.write_command(&["PSYNC", "?", "-1"])?;
+        Ok(Self { _link: link })
+    }
+}
+
+/// Blocks until the master has registered `expected` replicas.
+///
+/// `WAIT 0` asks for no replicas at all, so it is answered at once with the
+/// ones that are up to date - which, while nothing has been written, is every
+/// replica that has finished its PSYNC.
+fn await_registered_replicas(client: &mut RespClient, expected: usize) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if client.send_command(&["WAIT", "0", "0"])? == expected.to_string() {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    anyhow::bail!("the master never registered {} replicas", expected)
+}
+
+#[test]
+fn test_repeated_waits_are_not_thrown_off_by_their_own_requests() -> Result<()> {
+    // The tester's sequence: WAIT after WAIT with nothing written in between,
+    // each asking for more replicas than the last. Every one must report the
+    // replicas that are connected - with no writes outstanding they are all up
+    // to date, however little they have to say for themselves.
+    //
+    // The regression this guards: a WAIT that cannot be satisfied asks the
+    // replicas where they have got to, and that request lengthens the
+    // replication stream. A WAIT waiting for the end of the stream rather than
+    // for the writes in it then waits for bytes no replica was ever sent, and
+    // answers 0.
+    let master = ServerProcess::start_master(find_free_port());
+    let replica_count = 3;
+    let _replicas = (0..replica_count)
+        .map(|_| SilentReplica::join(master.port))
+        .collect::<Result<Vec<_>>>()?;
+    let mut client = master.client();
+    await_registered_replicas(&mut client, replica_count)?;
+
+    for requested in 1..=replica_count + 2 {
+        let response = client.send_command(&["WAIT", &requested.to_string(), "100"])?;
+
+        assert_eq!(response, replica_count.to_string(), "WAIT {} 100", requested);
+    }
+    Ok(())
+}
+
 #[test]
 fn test_wait_counts_the_replicas_that_processed_a_write() -> Result<()> {
     // The tester's sequence: a write, then a WAIT for the replicas to confirm

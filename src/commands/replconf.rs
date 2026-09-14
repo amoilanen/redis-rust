@@ -20,9 +20,9 @@ use crate::server_state::{ReplicaSlot, ServerState};
 use super::RedisCommand;
 
 /// Asks a replica how far into the replication stream it has got.
-const GET_ACKNOWLEDGEMENT: &str = "getack";
+const GETACK: &str = "getack";
 /// A replica's answer to that, carrying the offset it has reached.
-const ACKNOWLEDGEMENT: &str = "ack";
+const ACK: &str = "ack";
 
 /// REPLCONF command implementation.
 pub struct ReplConf {
@@ -41,10 +41,10 @@ impl RedisCommand for ReplConf {
             .ok_or(anyhow!("Subcommand not defined in {:?}", instructions))?;
 
         // Handled by the replica, self.replica is None
-        if sub_command.eq_ignore_ascii_case(GET_ACKNOWLEDGEMENT) {
+        if sub_command.eq_ignore_ascii_case(GETACK) {
             Ok(vec![self.acknowledgement()])
         // Handled by the server, self.replica contains connected replica from which this command was received
-        } else if sub_command.eq_ignore_ascii_case(ACKNOWLEDGEMENT) {
+        } else if sub_command.eq_ignore_ascii_case(ACK) {
             self.record_acknowledgement(instructions.get(2))?;
             Ok(Vec::new())
         } else {

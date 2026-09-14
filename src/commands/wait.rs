@@ -110,7 +110,7 @@ mod tests {
 
     fn propagate_a_write(server_state: &Arc<ServerState>) -> anyhow::Result<usize> {
         server_state.propagate_to_replicas(&set(&["SET", "foo", "41"]))?;
-        Ok(server_state.propagated_offset())
+        Ok(server_state.write_offset())
     }
 
     #[test]
