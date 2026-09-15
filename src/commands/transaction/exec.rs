@@ -88,6 +88,7 @@ impl RedisCommand for Exec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ServerOptions;
     use crate::commands::{client_error_message, command_message};
 
     fn exec(parts: &[&str], transaction: &Arc<TransactionSlot>, server_state: &Arc<ServerState>) -> Exec {
@@ -105,7 +106,7 @@ mod tests {
     }
 
     fn server_state() -> Arc<ServerState> {
-      Arc::new(ServerState::new(None, 6379))
+      Arc::new(ServerState::new(ServerOptions::initialize().with_port(6379)))
     }
 
     /// A connection that has sent MULTI.

@@ -98,6 +98,7 @@ impl ReplConf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ServerOptions;
     use crate::commands::{command_message, create_test_storage};
     use crate::server_state::ReplicaLink;
     use std::net::{TcpListener, TcpStream};
@@ -113,7 +114,7 @@ mod tests {
     fn replconf_from_replica(
         parts: &[&str],
     ) -> anyhow::Result<(ReplConf, TcpListener, Arc<ReplicaLink>)> {
-        let server_state = Arc::new(ServerState::new(None, 6379));
+        let server_state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(6379)));
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let replica = TcpStream::connect(listener.local_addr()?)?;
         let link = server_state.register_replica(&replica)?;
@@ -130,7 +131,7 @@ mod tests {
 
     #[test]
     fn test_replconf_listening_port() {
-        let server_state = Arc::new(ServerState::new(None, 6380));
+        let server_state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(6380)));
         let cmd = replconf_from_master(&["REPLCONF", "listening-port", "6380"], &server_state);
 
         let result = cmd.execute(&create_test_storage()).unwrap();
@@ -142,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_replconf_getack() {
-        let server_state = Arc::new(ServerState::new(None, 6379));
+        let server_state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(6379)));
         let cmd = replconf_from_master(&["REPLCONF", "getack", "*"], &server_state);
 
         let result = cmd.execute(&create_test_storage()).unwrap();
@@ -154,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_replconf_getack_reports_the_processed_offset() {
-        let server_state = Arc::new(ServerState::new(Some("localhost 6379".to_owned()), 6380));
+        let server_state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(6380).replicating("localhost 6379")));
         let first_offset = 37;
         let second_offset = 14;
         server_state.advance_replication_offset(first_offset);
@@ -205,7 +206,7 @@ mod tests {
 
     #[test]
     fn test_replconf_ack_from_a_client_is_ignored_rather_than_answered() {
-        let server_state = Arc::new(ServerState::new(None, 6379));
+        let server_state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(6379)));
         let cmd = replconf_from_master(&["REPLCONF", "ACK", "146"], &server_state);
 
         let result = cmd.execute(&create_test_storage()).unwrap();

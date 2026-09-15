@@ -13,6 +13,7 @@ use codecrafters_redis::commands::*;
 use codecrafters_redis::protocol;
 use codecrafters_redis::protocol::DataType;
 use codecrafters_redis::storage::{Storage, StoredValue};
+use codecrafters_redis::config::ServerOptions;
 use codecrafters_redis::server_state::ServerState;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -325,7 +326,7 @@ fn e2e_get_missing_key_fails() -> Result<()> {
 
 #[test]
 fn e2e_info_command_master() -> Result<()> {
-    let server_state = Arc::new(ServerState::new(None, 6379));
+    let server_state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(6379)));
     let msg = protocol::array(vec![
         protocol::bulk_string("INFO"),
         protocol::bulk_string("replication"),
@@ -347,7 +348,7 @@ fn e2e_info_command_master() -> Result<()> {
 
 #[test]
 fn e2e_info_command_replica() -> Result<()> {
-    let server_state = Arc::new(ServerState::new(Some("localhost 6379".to_owned()), 6380));
+    let server_state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(6380).replicating("localhost 6379")));
     let msg = protocol::array(vec![
         protocol::bulk_string("INFO"),
         protocol::bulk_string("replication"),

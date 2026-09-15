@@ -32,7 +32,7 @@ pub fn join_as_replica(
     server_state: &Arc<ServerState>,
 ) -> Result<(), anyhow::Error> {
     let mut stream = connect_to_master(master_address)?;
-    perform_handshake(&mut stream, server_state.port)?;
+    perform_handshake(&mut stream, server_state.options.port)?;
 
     info!("Replica listening for commands from master...");
     crate::connection::handle_connection(&mut stream, server_state, ConnectionMode::ConnectedMaster)

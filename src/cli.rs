@@ -1,6 +1,12 @@
 use std::num::ParseIntError;
 
-fn get_option_value(option_name: &str, args: &[String]) -> Option<String> {
+/// The value following `--<option_name>` on the command line, or `None` when
+/// the flag is absent or is the last argument with nothing after it.
+///
+/// `pub(crate)` rather than private: [`ServerOptions`](crate::config::ServerOptions)
+/// reads the options that have no accessor of their own - `--dir`,
+/// `--dbfilename` - straight through it, there being nothing to add on top.
+pub(crate) fn get_option_value(option_name: &str, args: &[String]) -> Option<String> {
     let option_flag = format!("--{}", option_name);
     if let Some(option_position) = args.iter().position(|x| x == &option_flag) {
         args.get(option_position + 1).cloned()
@@ -15,6 +21,14 @@ pub fn get_port(args: &[String]) -> Result<Option<usize>, anyhow::Error> {
             p.parse().map_err(|e: ParseIntError| e.into())
         )
         .transpose()
+}
+
+pub fn get_dbfilename(args: &[String]) -> Option<String> {
+    get_option_value("dbfilename", args)
+}
+
+pub fn get_dir(args: &[String]) -> Option<String> {
+    get_option_value("dir", args)
 }
 
 pub fn get_replica_of(args: &[String]) -> Option<String> {

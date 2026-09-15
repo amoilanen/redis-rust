@@ -700,3 +700,108 @@ fn test_concurrent_writes_to_same_key() -> Result<()> {
     assert_eq!(client_a.send_command(&["GET", "shared"])?, "from_b");
     Ok(())
 }
+
+// ========================= CONFIG GET =========================
+
+/// The directory and file name a server under test is told to keep its RDB
+/// file in. Neither has to exist: nothing reads the file yet.
+const RDB_DIR: &str = "/tmp/redis-files";
+const RDB_FILENAME: &str = "dump.rdb";
+
+/// A master started with `--dir /tmp/redis-files --dbfilename dump.rdb`, the
+/// command line the tester runs.
+fn server_with_rdb_file() -> ServerProcess {
+    ServerProcess::start_master_with_rdb_file(find_free_port(), RDB_DIR, RDB_FILENAME)
+}
+
+#[test]
+fn test_config_get_dir_returns_the_configured_directory() -> Result<()> {
+    let server = server_with_rdb_file();
+    let mut client = server.client();
+
+    let resp = client.send_command_json(&["CONFIG", "GET", "dir"])?;
+
+    assert_eq!(resp, r#"["dir","/tmp/redis-files"]"#);
+    Ok(())
+}
+
+#[test]
+fn test_config_get_dbfilename_returns_the_configured_file_name() -> Result<()> {
+    let server = server_with_rdb_file();
+    let mut client = server.client();
+
+    let resp = client.send_command_json(&["CONFIG", "GET", "dbfilename"])?;
+
+    assert_eq!(resp, r#"["dbfilename","dump.rdb"]"#);
+    Ok(())
+}
+
+#[test]
+fn test_config_get_answers_in_bulk_strings() -> Result<()> {
+    // The exact bytes the tester matches on - an array of two bulk strings,
+    // not simple ones, which the parsed rendering above cannot tell apart.
+    let server = server_with_rdb_file();
+    let mut client = server.client();
+    let expected = "*2\r\n$3\r\ndir\r\n$16\r\n/tmp/redis-files\r\n";
+
+    client.write_command(&["CONFIG", "GET", "dir"])?;
+    let resp = client.read_raw(expected.len())?;
+
+    assert_eq!(String::from_utf8(resp)?, expected);
+    Ok(())
+}
+
+#[test]
+fn test_config_get_both_parameters_on_one_connection() -> Result<()> {
+    // The tester's sequence: both parameters asked for in turn, down the same
+    // connection.
+    let server = server_with_rdb_file();
+    let mut client = server.client();
+
+    assert_eq!(
+        client.send_command_json(&["CONFIG", "GET", "dir"])?,
+        r#"["dir","/tmp/redis-files"]"#
+    );
+    assert_eq!(
+        client.send_command_json(&["CONFIG", "GET", "dbfilename"])?,
+        r#"["dbfilename","dump.rdb"]"#
+    );
+    Ok(())
+}
+
+#[test]
+fn test_config_get_leaves_out_a_parameter_the_server_has_no_value_for() -> Result<()> {
+    // Started without --dir or --dbfilename: an empty array, not an error.
+    let server = ServerProcess::start_master(find_free_port());
+    let mut client = server.client();
+
+    assert_eq!(client.send_command_json(&["CONFIG", "GET", "dir"])?, "[]");
+    assert_eq!(
+        client.send_command_json(&["CONFIG", "GET", "maxmemory"])?,
+        "[]"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_config_keeps_serving_after_an_unsupported_subcommand() -> Result<()> {
+    // A client-facing error, so the connection survives it.
+    let server = server_with_rdb_file();
+    let mut client = server.client();
+
+    let error = client
+        .send_command(&["CONFIG", "SET", "dir", "/tmp"])
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error.contains("Unknown CONFIG subcommand"),
+        "unexpected error: {}",
+        error
+    );
+    assert_eq!(
+        client.send_command_json(&["CONFIG", "GET", "dir"])?,
+        r#"["dir","/tmp/redis-files"]"#
+    );
+    Ok(())
+}

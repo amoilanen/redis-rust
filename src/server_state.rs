@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use rand::Rng;
 use crate::commands::RedisCommand;
 use crate::blocking::BlockingNotifier;
+use crate::config::ServerOptions;
 use crate::error::RedisError;
 use crate::protocol;
 use crate::storage::Storage;
@@ -91,8 +92,13 @@ impl Default for ReplicaSlot {
 }
 
 pub struct ServerState {
-    pub port: usize,
-    pub replica_of: Option<String>,
+    /// The command line this server was started with - the port it listens
+    /// on, the master it follows, where its RDB file lives.
+    ///
+    /// Held whole rather than unpacked into a field per flag: `CONFIG GET`
+    /// answers for the options by name, which only works while they are still
+    /// a set of named options rather than scattered across the state.
+    pub options: ServerOptions,
     pub master_replication_id: Option<String>,
     pub master_replication_offset: Option<usize>,
     /// The replicas that have finished `PSYNC` and are being streamed to.
@@ -170,7 +176,7 @@ impl ServerState {
     }
 
     pub fn is_master(&self) -> bool {
-        self.replica_of.is_none()
+        self.options.replica_of.is_none()
     }
 
     pub fn is_replica(&self) -> bool {
@@ -384,7 +390,7 @@ impl ServerState {
     }
 
     pub fn get_replica_of_address(&self) -> Result<Option<String>, anyhow::Error> {
-        match &self.replica_of {
+        match &self.options.replica_of {
             Some(replica_of) => {
                 let error = RedisError { 
                     message: format!("Cannot parse replica_of {}", replica_of)
@@ -407,38 +413,25 @@ impl ServerState {
         formatted_bytes
     }
 
-    pub fn new<'a>(replica_of: Option<String>, port: usize) -> ServerState {
-        let blocking = Arc::new(BlockingNotifier::new());
-        let storage = Mutex::new(Storage::new(HashMap::new()));
-        match replica_of {
-            Some(replica_of) =>
-                ServerState {
-                    port,
-                    replica_of: Some(replica_of),
-                    master_replication_id: None,
-                    master_replication_offset: None,
-                    replica_links: Mutex::new(Vec::new()),
-                    blocking_notifier: blocking,
-                    storage,
-                    replication_offset: AtomicUsize::new(0),
-                    stream_offset: AtomicUsize::new(0),
-                    write_offset: AtomicUsize::new(0),
-                    acknowledgements: (Mutex::new(0), Condvar::new()),
-                },
-            None =>
-                ServerState {
-                    port,
-                    replica_of: None,
-                    master_replication_id: Some(ServerState::generate_replication_id()),
-                    master_replication_offset: Some(0),
-                    replica_links: Mutex::new(Vec::new()),
-                    blocking_notifier: blocking,
-                    storage,
-                    replication_offset: AtomicUsize::new(0),
-                    stream_offset: AtomicUsize::new(0),
-                    write_offset: AtomicUsize::new(0),
-                    acknowledgements: (Mutex::new(0), Condvar::new()),
-                }
+    /// A server as its command line describes it, with an empty keyspace and
+    /// nothing replicated yet.
+    ///
+    /// A master names its own replication stream; a replica leaves both
+    /// replication fields empty, adopting the identity of the master it is
+    /// about to meet.
+    pub fn new(options: ServerOptions) -> ServerState {
+        let is_master = options.replica_of.is_none();
+        ServerState {
+            options,
+            master_replication_id: is_master.then(ServerState::generate_replication_id),
+            master_replication_offset: is_master.then_some(0),
+            replica_links: Mutex::new(Vec::new()),
+            blocking_notifier: Arc::new(BlockingNotifier::new()),
+            storage: Mutex::new(Storage::new(HashMap::new())),
+            replication_offset: AtomicUsize::new(0),
+            stream_offset: AtomicUsize::new(0),
+            write_offset: AtomicUsize::new(0),
+            acknowledgements: (Mutex::new(0), Condvar::new()),
         }
     }
 }
@@ -463,7 +456,7 @@ mod tests {
     fn master_with_replicas(
         replicas: usize,
     ) -> (Arc<ServerState>, TcpListener, Vec<Arc<ReplicaLink>>) {
-        let state = Arc::new(ServerState::new(None, 1234));
+        let state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(1234)));
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let links = (0..replicas)
@@ -477,9 +470,9 @@ mod tests {
 
     #[test]
     fn should_set_replication_id_and_offset_for_master() -> Result<(), Box<dyn std::error::Error>> {
-        let state = ServerState::new(None, 1234);
-        assert_eq!(state.replica_of, None);
-        assert_eq!(state.port, 1234);
+        let state = ServerState::new(ServerOptions::initialize().with_port(1234));
+        assert_eq!(state.options.replica_of, None);
+        assert_eq!(state.options.port, 1234);
         assert_eq!(state.master_replication_offset, Some(0));
         assert_eq!(state.master_replication_id.map(|x| x.len()).unwrap_or(0), 40);
         Ok(())
@@ -487,9 +480,9 @@ mod tests {
 
     #[test]
     fn should_set_replication_id_and_offset_for_slave() -> Result<(), Box<dyn std::error::Error>> {
-        let state = ServerState::new(Some("localhost 6379".to_owned()), 1234);
-        assert_eq!(state.replica_of, Some("localhost 6379".to_owned()));
-        assert_eq!(state.port, 1234);
+        let state = ServerState::new(ServerOptions::initialize().with_port(1234).replicating("localhost 6379"));
+        assert_eq!(state.options.replica_of, Some("localhost 6379".to_owned()));
+        assert_eq!(state.options.port, 1234);
         assert_eq!(state.master_replication_offset, None);
         assert_eq!(state.master_replication_id, None);
         Ok(())
@@ -497,14 +490,14 @@ mod tests {
 
     #[test]
     fn should_count_no_replicas_on_a_fresh_master() {
-        let state = ServerState::new(None, 1234);
+        let state = ServerState::new(ServerOptions::initialize().with_port(1234));
 
         assert_eq!(state.replica_count().unwrap(), 0);
     }
 
     #[test]
     fn should_count_every_registered_replica() {
-        let state = ServerState::new(None, 1234);
+        let state = ServerState::new(ServerOptions::initialize().with_port(1234));
         // A registered replica is just a connection the master holds on to, so
         // any live stream stands in for one here.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -520,14 +513,14 @@ mod tests {
 
     #[test]
     fn should_start_the_replication_offset_at_zero() {
-        let state = ServerState::new(Some("localhost 6379".to_owned()), 1234);
+        let state = ServerState::new(ServerOptions::initialize().with_port(1234).replicating("localhost 6379"));
 
         assert_eq!(state.replication_offset(), 0);
     }
 
     #[test]
     fn should_accumulate_the_replication_offset() {
-        let state = ServerState::new(Some("localhost 6379".to_owned()), 1234);
+        let state = ServerState::new(ServerOptions::initialize().with_port(1234).replicating("localhost 6379"));
 
         // The byte sizes of REPLCONF GETACK * and PING on the wire.
         state.advance_replication_offset(37);
@@ -538,7 +531,7 @@ mod tests {
 
     #[test]
     fn should_start_both_master_offsets_at_zero() {
-        let state = ServerState::new(None, 1234);
+        let state = ServerState::new(ServerOptions::initialize().with_port(1234));
 
         assert_eq!(state.stream_offset(), 0);
         assert_eq!(state.write_offset(), 0);

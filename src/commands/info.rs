@@ -28,7 +28,7 @@ impl RedisCommand for Info {
         let argument = instructions.get(1).ok_or::<anyhow::Error>(error.clone().into())?;
 
         let reply = if argument == "replication" {
-            let role = match &self.server_state.replica_of {
+            let role = match &self.server_state.options.replica_of {
                 Some(_) => "slave",
                 None => "master",
             };
@@ -78,12 +78,13 @@ impl RedisCommand for Info {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ServerOptions;
     use crate::commands::command_message;
     use std::collections::HashMap;
 
     #[test]
     fn test_info_replication_master() {
-        let server_state = Arc::new(ServerState::new(None, 6379));
+        let server_state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(6379)));
         let message = command_message(&["INFO", "replication"]);
         let cmd = Info {
             message,
@@ -101,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_info_replication_slave() {
-        let server_state = Arc::new(ServerState::new(Some("localhost 6379".to_owned()), 6380));
+        let server_state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(6380).replicating("localhost 6379")));
         let message = command_message(&["INFO", "replication"]);
         let cmd = Info {
             message,

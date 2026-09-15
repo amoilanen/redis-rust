@@ -78,11 +78,12 @@ impl RedisCommand for PSync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ServerOptions;
     use crate::commands::command_message;
 
     #[test]
     fn test_psync_returns_fullresync() {
-        let server_state = Arc::new(ServerState::new(None, 6379));
+        let server_state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(6379)));
         let message = command_message(&["PSYNC", "?", "-1"]);
         let cmd = PSync {
             message,

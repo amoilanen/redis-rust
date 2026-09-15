@@ -5,22 +5,22 @@ use std::time::Duration;
 
 use log::*;
 
-use codecrafters_redis::cli;
+use codecrafters_redis::config::ServerOptions;
 use codecrafters_redis::connection::{self, ConnectionMode};
 use codecrafters_redis::replication;
 use codecrafters_redis::server_state::ServerState;
 
-const DEFAULT_PORT: usize = 6379;
-
 fn main() -> Result<(), anyhow::Error> {
     env_logger::init();
 
+    // Read once, up front: from here on the command line is the server's
+    // options, which it carries for as long as it runs and answers CONFIG GET
+    // from.
     let args: Vec<String> = std::env::args().collect();
+    let options = ServerOptions::from_args(&args)?;
+    let port = options.port;
 
-    let port = cli::get_port(&args)?.unwrap_or(DEFAULT_PORT);
-    let replica_of = cli::get_replica_of(&args);
-
-    let server_state = Arc::new(ServerState::new(replica_of.clone(), port));
+    let server_state = Arc::new(ServerState::new(options));
 
     // If this is a replica, spawn a thread to connect to the master
     if let Some(replica_of_address) = server_state.get_replica_of_address()? {

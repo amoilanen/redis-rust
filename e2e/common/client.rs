@@ -141,6 +141,18 @@ impl RespClient {
         }
     }
 
+    /// Read the next `count` bytes of the reply verbatim, ahead of any
+    /// parsing.
+    ///
+    /// For a test that cares about the exact wire form of a reply - that
+    /// `CONFIG GET` answers in bulk strings rather than simple ones, say -
+    /// which the parsed renderings above deliberately smooth over.
+    pub fn read_raw(&mut self, count: usize) -> anyhow::Result<Vec<u8>> {
+        let mut bytes = vec![0u8; count];
+        self.reader.read_exact(&mut bytes)?;
+        Ok(bytes)
+    }
+
     /// Parse one RESP2 frame from the stream into a [`RespValue`].
     ///
     /// This is the single source of wire-reading logic shared by

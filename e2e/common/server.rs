@@ -38,16 +38,37 @@ pub struct ServerProcess {
 impl ServerProcess {
     /// Start a **master** server on the given port.
     pub fn start_master(port: u16) -> Self {
-        Self::start_with_retry(port, None)
+        Self::start_with_retry(port, Vec::new())
     }
 
     /// Start a **replica** server that connects to `master_port`.
     pub fn start_replica(port: u16, master_port: u16) -> Self {
-        Self::start_with_retry(port, Some(master_port))
+        Self::start_with_retry(
+            port,
+            vec!["--replicaof".to_owned(), format!("127.0.0.1 {}", master_port)],
+        )
     }
 
-    /// Start a server, re-allocating the port and respawning if the port turns
-    /// out to be taken by another process.
+    /// Start a **master** told where to keep its RDB file, as
+    /// `--dir <dir> --dbfilename <dbfilename>`.
+    ///
+    /// Neither path has to exist: nothing reads or writes the file yet, and
+    /// the options are only there to be reported back by `CONFIG GET`.
+    pub fn start_master_with_rdb_file(port: u16, dir: &str, dbfilename: &str) -> Self {
+        Self::start_with_retry(
+            port,
+            vec![
+                "--dir".to_owned(),
+                dir.to_owned(),
+                "--dbfilename".to_owned(),
+                dbfilename.to_owned(),
+            ],
+        )
+    }
+
+    /// Start a server with `options` on its command line - everything bar the
+    /// `--port`, which is this method's to retry with - re-allocating the port
+    /// and respawning if the port turns out to be taken by another process.
     ///
     /// A free port can only ever be *observed* free: between the moment
     /// [`find_free_port`] releases it and the moment the server binds it, another
@@ -55,9 +76,9 @@ impl ServerProcess {
     /// leaving this server to die with `Address already in use`.  That is a
     /// lost race rather than a failure of the code under test, so it is simply
     /// retried on a fresh port.
-    fn start_with_retry(mut port: u16, master_port: Option<u16>) -> Self {
+    fn start_with_retry(mut port: u16, options: Vec<String>) -> Self {
         for attempt in 1..=START_ATTEMPTS {
-            match Self::try_start(port, master_port) {
+            match Self::try_start(port, &options) {
                 Ok(server) => return server,
                 Err(error) if is_address_in_use(&error) && attempt < START_ATTEMPTS => {
                     eprintln!(
@@ -77,13 +98,9 @@ impl ServerProcess {
     ///
     /// The spawned child is owned by the returned `ServerProcess`, so a failed
     /// attempt kills it via `Drop` before the caller retries.
-    fn try_start(port: u16, master_port: Option<u16>) -> Result<Self, String> {
-        let port_arg = port.to_string();
-        let mut args = vec!["--port", &port_arg];
-        let replicaof = master_port.map(|mp| format!("127.0.0.1 {}", mp));
-        if let Some(ref replicaof) = replicaof {
-            args.extend(["--replicaof", replicaof]);
-        }
+    fn try_start(port: u16, options: &[String]) -> Result<Self, String> {
+        let mut args = vec!["--port".to_owned(), port.to_string()];
+        args.extend_from_slice(options);
 
         let log_path = server_log_path(port);
         let log = File::create(&log_path).expect("failed to create server log");

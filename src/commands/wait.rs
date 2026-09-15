@@ -76,6 +76,7 @@ impl RedisCommand for Wait {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ServerOptions;
     use std::net::{TcpListener, TcpStream};
     use std::thread;
     use std::time::Instant;
@@ -90,7 +91,7 @@ mod tests {
     }
 
     fn master() -> Arc<ServerState> {
-        Arc::new(ServerState::new(None, 6379))
+        Arc::new(ServerState::new(ServerOptions::initialize().with_port(6379)))
     }
 
     fn master_with_replicas(
