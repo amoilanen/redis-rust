@@ -4,6 +4,7 @@ pub mod commands;
 pub mod config;
 pub mod connection;
 pub mod error;
+pub mod glob;
 pub mod io;
 pub mod protocol;
 pub mod replication;

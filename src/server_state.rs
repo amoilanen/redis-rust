@@ -1,7 +1,8 @@
 use anyhow::anyhow;
 use log::*;
 use std::collections::HashMap;
-use std::io::Write;
+use std::fs::File;
+use std::io::{ErrorKind, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -12,6 +13,7 @@ use crate::blocking::BlockingNotifier;
 use crate::config::ServerOptions;
 use crate::error::RedisError;
 use crate::protocol;
+use crate::rdb;
 use crate::storage::Storage;
 
 pub struct ReplicaLink {
@@ -434,6 +436,71 @@ impl ServerState {
             acknowledgements: (Mutex::new(0), Condvar::new()),
         }
     }
+
+    /// Fills the keyspace from the RDB file this server was pointed at, if
+    /// there is one to read.
+    ///
+    /// Deliberately not part of [`new`](Self::new): constructing the state
+    /// says what the server *is*, and reading a file is something it *does*.
+    /// Keeping the two apart is what lets every test build a state without
+    /// touching the disk, and what makes the one place that does read it -
+    /// `main`, at startup - visible.
+    ///
+    /// Nothing here is worth refusing to start over, so nothing here fails:
+    ///
+    /// - no `--dir`/`--dbfilename`: this server was never given a file, so
+    ///   there is nothing to load.
+    /// - the file does not exist: an RDB file that was never written is an
+    ///   empty database, which is what the server already has.
+    /// - the file cannot be read or does not parse: warned about and left
+    ///   alone. Real Redis refuses to start on a corrupt file; a server that
+    ///   comes up empty is the friendlier answer here, and the warning is
+    ///   what says the keys are missing on purpose.
+    ///
+    /// The only error it can return is a poisoned keyspace lock, which is a
+    /// panic elsewhere rather than anything about the file.
+    pub fn load_rdb_file(&self) -> Result<(), anyhow::Error> {
+        let Some(path) = self.options.rdb_path() else {
+            debug!("No RDB file configured, starting with an empty keyspace");
+            return Ok(());
+        };
+
+        let file = match File::open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                info!("No RDB file at {}, starting with an empty keyspace", path.display());
+                return Ok(());
+            }
+            Err(error) => {
+                warn!("Could not open the RDB file at {}: {}. Starting with an empty keyspace", path.display(), error);
+                return Ok(());
+            }
+        };
+
+        match rdb::from_rdb(file) {
+            Ok(loaded) => {
+                let key_count = loaded.data.len();
+                let mut storage = self.lock_storage()?;
+                *storage = loaded;
+                info!("Loaded {} key(s) from the RDB file at {}", key_count, path.display());
+            }
+            Err(error) => warn!(
+                "Could not read the RDB file at {}: {:#}. Starting with an empty keyspace",
+                path.display(),
+                error
+            ),
+        }
+
+        Ok(())
+    }
+
+    /// The keyspace, locked. Turns a poisoned lock - which carries a
+    /// `MutexGuard` that cannot cross an `anyhow::Error` - into a plain error.
+    fn lock_storage(&self) -> Result<MutexGuard<'_, Storage>, anyhow::Error> {
+        self.storage
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock storage: {}", e))
+    }
 }
 
 #[cfg(test)]
@@ -657,3 +724,136 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod rdb_loading_tests {
+    use super::*;
+    use std::path::Path;
+
+    use tempfile::TempDir;
+
+    /// A directory that deletes itself, and everything in it, when the test
+    /// drops it - so a failing assertion leaves no fixture behind.
+    fn temp_dir() -> TempDir {
+        TempDir::new().expect("failed to create a temp directory")
+    }
+
+    /// The RDB bytes of a database holding `pairs`, as `SAVE` would have
+    /// written them.
+    fn rdb_bytes(pairs: &[(&str, &str)]) -> Vec<u8> {
+        let mut storage = Storage::new(HashMap::new());
+        for (key, value) in pairs {
+            storage.set(key, value.as_bytes().to_vec(), None).unwrap();
+        }
+        storage.as_rdb_bytes().unwrap()
+    }
+
+    /// A server told to keep its RDB file at `dir/dbfilename`, with the
+    /// keyspace still empty.
+    fn server_with_rdb_file(dir: &Path, dbfilename: &str) -> ServerState {
+        ServerState::new(
+            ServerOptions::initialize()
+                .with_port(1234)
+                .with_rdb_file(dir.to_str().expect("temp path is not text"), dbfilename),
+        )
+    }
+
+    /// Writes `contents` into `dir` as `name`.
+    fn write_file(dir: &TempDir, name: &str, contents: &[u8]) {
+        std::fs::write(dir.path().join(name), contents).expect("failed to write the fixture");
+    }
+
+    /// The keys this server currently holds, sorted so they can be compared.
+    fn keys(state: &ServerState) -> Vec<String> {
+        let mut keys: Vec<String> = state.storage().lock().unwrap().data.keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn should_fill_the_keyspace_from_the_rdb_file() {
+        let dir = temp_dir();
+        write_file(&dir, "dump.rdb", &rdb_bytes(&[("foo", "bar"), ("baz", "qux")]));
+        let state = server_with_rdb_file(dir.path(), "dump.rdb");
+
+        state.load_rdb_file().unwrap();
+
+        assert_eq!(keys(&state), vec!["baz".to_owned(), "foo".to_owned()]);
+        let storage = state.storage().lock().unwrap();
+        assert_eq!(
+            storage.data["foo"].string_value_as_bytes(),
+            Some(b"bar".as_slice())
+        );
+    }
+
+    #[test]
+    fn should_start_empty_when_the_rdb_file_does_not_exist() {
+        // The directory is real, the file inside it never written: the tester
+        // starts a server this way, and it is an empty database rather than a
+        // failure.
+        let dir = temp_dir();
+        let state = server_with_rdb_file(dir.path(), "dump.rdb");
+
+        state.load_rdb_file().unwrap();
+
+        assert_eq!(keys(&state), Vec::<String>::new());
+    }
+
+    #[test]
+    fn should_start_empty_when_the_directory_does_not_exist_either() {
+        let dir = temp_dir();
+        let missing = dir.path().join("not-created-yet");
+        let state = server_with_rdb_file(&missing, "dump.rdb");
+
+        state.load_rdb_file().unwrap();
+
+        assert_eq!(keys(&state), Vec::<String>::new());
+    }
+
+    #[test]
+    fn should_start_empty_when_no_rdb_file_was_configured() {
+        // No --dir, no --dbfilename: there is no file to read, and asking for
+        // one is not an error.
+        let state = ServerState::new(ServerOptions::initialize().with_port(1234));
+
+        state.load_rdb_file().unwrap();
+
+        assert_eq!(keys(&state), Vec::<String>::new());
+    }
+
+    #[test]
+    fn should_start_empty_rather_than_fail_on_a_file_that_is_not_an_rdb_file() {
+        let dir = temp_dir();
+        write_file(&dir, "dump.rdb", b"this is not an RDB file at all");
+        let state = server_with_rdb_file(dir.path(), "dump.rdb");
+
+        // Warned about, not refused: the server comes up serving an empty
+        // database instead of not coming up.
+        state.load_rdb_file().unwrap();
+
+        assert_eq!(keys(&state), Vec::<String>::new());
+    }
+
+    #[test]
+    fn should_start_empty_rather_than_fail_on_a_truncated_rdb_file() {
+        let dir = temp_dir();
+        let complete = rdb_bytes(&[("foo", "bar")]);
+        write_file(&dir, "dump.rdb", &complete[..complete.len() / 2]);
+        let state = server_with_rdb_file(dir.path(), "dump.rdb");
+
+        state.load_rdb_file().unwrap();
+
+        assert_eq!(keys(&state), Vec::<String>::new());
+    }
+
+    #[test]
+    fn should_load_an_rdb_file_holding_no_keys() {
+        let dir = temp_dir();
+        write_file(&dir, "dump.rdb", &rdb_bytes(&[]));
+        let state = server_with_rdb_file(dir.path(), "dump.rdb");
+
+        state.load_rdb_file().unwrap();
+
+        assert_eq!(keys(&state), Vec::<String>::new());
+    }
+}

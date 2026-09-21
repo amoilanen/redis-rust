@@ -185,7 +185,7 @@ fn handle_rdb_snapshot(
     value: &[u8],
     storage: &Mutex<Storage>,
 ) -> Result<(), anyhow::Error> {
-    let maybe_received_storage = Storage::from_rdb(value).ok();
+    let maybe_received_storage = Storage::from_rdb_bytes(value).ok();
     debug!("Received storage {:?}", &maybe_received_storage);
     if let Some(received_storage) = maybe_received_storage {
         let mut storage = storage

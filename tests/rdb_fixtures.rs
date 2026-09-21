@@ -525,8 +525,8 @@ fn rdb_round_trip_via_storage_api() -> Result<()> {
     storage.set("user:2", b"bob".to_vec(), Some(3_600_000))?;
     storage.set("counter", b"42".to_vec(), None)?;
 
-    let rdb_bytes = storage.to_rdb()?;
-    let loaded = Storage::from_rdb(&rdb_bytes)?;
+    let rdb_bytes = storage.as_rdb_bytes()?;
+    let loaded = Storage::from_rdb_bytes(&rdb_bytes)?;
 
     assert_eq!(loaded.to_pairs().get("user:1"), Some(&b"alice".to_vec()));
     assert_eq!(loaded.to_pairs().get("user:2"), Some(&b"bob".to_vec()));
@@ -540,8 +540,8 @@ fn rdb_round_trip_binary_values() -> Result<()> {
     let binary = vec![0u8, 1, 2, 127, 128, 254, 255];
     storage.set("binary", binary.clone(), None)?;
 
-    let rdb_bytes = storage.to_rdb()?;
-    let loaded = Storage::from_rdb(&rdb_bytes)?;
+    let rdb_bytes = storage.as_rdb_bytes()?;
+    let loaded = Storage::from_rdb_bytes(&rdb_bytes)?;
 
     assert_eq!(loaded.to_pairs().get("binary"), Some(&binary));
     Ok(())
@@ -553,8 +553,8 @@ fn rdb_round_trip_empty_values() -> Result<()> {
     storage.set("empty", b"".to_vec(), None)?;
     storage.set("notempty", b"x".to_vec(), None)?;
 
-    let rdb_bytes = storage.to_rdb()?;
-    let loaded = Storage::from_rdb(&rdb_bytes)?;
+    let rdb_bytes = storage.as_rdb_bytes()?;
+    let loaded = Storage::from_rdb_bytes(&rdb_bytes)?;
 
     assert_eq!(loaded.to_pairs().get("empty"), Some(&b"".to_vec()));
     assert_eq!(loaded.to_pairs().get("notempty"), Some(&b"x".to_vec()));

@@ -22,6 +22,11 @@ fn main() -> Result<(), anyhow::Error> {
 
     let server_state = Arc::new(ServerState::new(options));
 
+    // The keyspace starts out empty and is filled from disk here rather than
+    // by the constructor: a server that was pointed at an RDB file serves
+    // what that file holds from its very first command.
+    server_state.load_rdb_file()?;
+
     // If this is a replica, spawn a thread to connect to the master
     if let Some(replica_of_address) = server_state.get_replica_of_address()? {
         let server_state = Arc::clone(&server_state);

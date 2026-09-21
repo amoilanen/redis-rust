@@ -1,7 +1,7 @@
 //! Spawning and supervising the redis-rust binary under test.
 
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -52,14 +52,16 @@ impl ServerProcess {
     /// Start a **master** told where to keep its RDB file, as
     /// `--dir <dir> --dbfilename <dbfilename>`.
     ///
-    /// Neither path has to exist: nothing reads or writes the file yet, and
-    /// the options are only there to be reported back by `CONFIG GET`.
-    pub fn start_master_with_rdb_file(port: u16, dir: &str, dbfilename: &str) -> Self {
+    /// The server reads the file at startup and serves what it holds. Neither
+    /// path has to exist, though: an RDB file that was never written is an
+    /// empty database, and a server started this way on a directory with
+    /// nothing in it is a perfectly good one to ask `CONFIG GET`.
+    pub fn start_master_with_rdb_file(port: u16, dir: &Path, dbfilename: &str) -> Self {
         Self::start_with_retry(
             port,
             vec![
                 "--dir".to_owned(),
-                dir.to_owned(),
+                dir.to_str().expect("temp path is not text").to_owned(),
                 "--dbfilename".to_owned(),
                 dbfilename.to_owned(),
             ],

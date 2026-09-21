@@ -122,10 +122,11 @@ impl ServerOptions {
     /// Where this server's RDB file is, or `None` if it was not told.
     ///
     /// Both halves are needed: a directory with no file name names no file,
-    /// and a file name with no directory would have to guess at one. Nothing
-    /// reads the file yet - persistence arrives in a later stage - but the
-    /// path it will be read from is a property of the options, so it is
-    /// answered here.
+    /// and a file name with no directory would have to guess at one. `None`
+    /// is what tells
+    /// [`ServerState::load_rdb_file`](crate::server_state::ServerState::load_rdb_file)
+    /// there is nothing to read, which is not the same as a file that is
+    /// named but missing - that one is an empty database.
     pub fn rdb_path(&self) -> Option<PathBuf> {
         let dir = self.dir.as_ref()?;
         let dbfilename = self.dbfilename.as_ref()?;

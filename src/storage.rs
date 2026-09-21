@@ -165,13 +165,13 @@ impl Storage {
             .unwrap_or_default()
     }
 
-    pub fn to_rdb(&self) -> Result<Vec<u8>, Error> {
+    pub fn as_rdb_bytes(&self) -> Result<Vec<u8>, Error> {
         let mut buffer: Vec<u8> = Vec::new();
         let mut writer = Cursor::new(&mut buffer);
         rdb::to_rdb(&self, &mut writer)?;
         Ok(buffer)
     }
-    pub fn from_rdb(rdb: &[u8]) -> Result<Storage, Error> {
+    pub fn from_rdb_bytes(rdb: &[u8]) -> Result<Storage, Error> {
         let mut reader = Cursor::new(&rdb);
         rdb::from_rdb(&mut reader)
     }

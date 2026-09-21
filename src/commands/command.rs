@@ -8,7 +8,7 @@ use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 use super::RedisCommand;
-use crate::commands::{self, Config, Echo, Ping, Set, Get, Incr, Multi, Exec, Discard, Info, ReplConf, PSync, Wait, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
+use crate::commands::{self, Config, Echo, Ping, Set, Get, Incr, Keys, Multi, Exec, Discard, Info, ReplConf, PSync, Wait, RPush, LPush, LRange, LLen, LPop, BLPop, Type, XAdd, XRange, XRead};
 use crate::commands::transaction::TransactionSlot;
 use crate::server_state::{ReplicaSlot, ServerState};
 
@@ -73,6 +73,7 @@ fn build_command(
         "SET"      => Box::new(Set { message }),
         "GET"      => Box::new(Get { message }),
         "INCR"     => Box::new(Incr { message }),
+        "KEYS"     => Box::new(Keys { message }),
         "MULTI"    => Box::new(Multi { message, transaction: transaction() }),
         "EXEC"     => Box::new(Exec { message, transaction: transaction(), replica: replica(), server_state: state() }),
         "DISCARD"  => Box::new(Discard { message, transaction: transaction() }),

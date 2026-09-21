@@ -49,7 +49,7 @@ impl RedisCommand for PSync {
         let rdb_bytes = storage
             .lock()
             .map_err(|e| anyhow!("Failed to lock storage: {}", e))?
-            .to_rdb()?;
+            .as_rdb_bytes()?;
         reply.push(DataType::Rdb { value: rdb_bytes });
 
         //TODO: In practice it would be OK to send this command, but it fails some test expectations on Codecrafters, commenting out temporarily

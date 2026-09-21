@@ -6,7 +6,7 @@
 mod common;
 
 use anyhow::Result;
-use common::{find_free_port, ServerProcess};
+use common::{find_free_port, server_loaded_from_rdb, temp_dir, write_file, ServerProcess, RDB_FILENAME};
 use std::thread;
 use std::time::Duration;
 
@@ -703,15 +703,18 @@ fn test_concurrent_writes_to_same_key() -> Result<()> {
 
 // ========================= CONFIG GET =========================
 
-/// The directory and file name a server under test is told to keep its RDB
-/// file in. Neither has to exist: nothing reads the file yet.
+/// The directory a server under test is told to keep its RDB file in; the file
+/// name it is paired with is [`RDB_FILENAME`].
+///
+/// Neither has to exist for `CONFIG GET` to report them back, which is all the
+/// tests just below ask of them. The `KEYS` tests further down want a file
+/// there to read, and make their own directory rather than share this one.
 const RDB_DIR: &str = "/tmp/redis-files";
-const RDB_FILENAME: &str = "dump.rdb";
 
 /// A master started with `--dir /tmp/redis-files --dbfilename dump.rdb`, the
 /// command line the tester runs.
 fn server_with_rdb_file() -> ServerProcess {
-    ServerProcess::start_master_with_rdb_file(find_free_port(), RDB_DIR, RDB_FILENAME)
+    ServerProcess::start_master_with_rdb_file(find_free_port(), std::path::Path::new(RDB_DIR), RDB_FILENAME)
 }
 
 #[test]
@@ -803,5 +806,131 @@ fn test_config_keeps_serving_after_an_unsupported_subcommand() -> Result<()> {
         client.send_command_json(&["CONFIG", "GET", "dir"])?,
         r#"["dir","/tmp/redis-files"]"#
     );
+    Ok(())
+}
+
+// ========================= KEYS over an RDB file =========================
+
+#[test]
+fn test_keys_returns_the_single_key_in_the_rdb_file() -> Result<()> {
+    let (server, _dir) = server_loaded_from_rdb(&[("foo", "bar")]);
+    let mut client = server.client();
+
+    let resp = client.send_command_json(&["KEYS", "*"])?;
+
+    assert_eq!(resp, r#"["foo"]"#);
+    Ok(())
+}
+
+#[test]
+fn test_keys_answers_in_an_array_of_bulk_strings() -> Result<()> {
+    // The exact bytes the tester matches on, which the parsed rendering above
+    // cannot tell from an array of simple strings.
+    let (server, _dir) = server_loaded_from_rdb(&[("foo", "bar")]);
+    let mut client = server.client();
+    let expected = "*1\r\n$3\r\nfoo\r\n";
+
+    client.write_command(&["KEYS", "*"])?;
+    let resp = client.read_raw(expected.len())?;
+
+    assert_eq!(String::from_utf8(resp)?, expected);
+    Ok(())
+}
+
+#[test]
+fn test_keys_returns_every_key_in_the_rdb_file() -> Result<()> {
+    let (server, _dir) = server_loaded_from_rdb(&[("foo", "1"), ("bar", "2"), ("baz", "3")]);
+    let mut client = server.client();
+
+    // The keyspace is a hash map, so the reply comes back in no particular
+    // order: compare the set of names rather than the sequence.
+    let mut names: Vec<String> = client
+        .send_command(&["KEYS", "*"])?
+        .split(',')
+        .map(str::to_owned)
+        .collect();
+    names.sort();
+
+    assert_eq!(names, vec!["bar", "baz", "foo"]);
+    Ok(())
+}
+
+#[test]
+fn test_keys_is_empty_when_the_rdb_file_does_not_exist() -> Result<()> {
+    // The directory is real, the file inside it never written: an RDB file
+    // that was never saved is an empty database, not a server that refuses to
+    // start.
+    let dir = temp_dir();
+    let server = ServerProcess::start_master_with_rdb_file(find_free_port(), dir.path(), RDB_FILENAME);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command_json(&["KEYS", "*"])?, "[]");
+    // And it is a working server, not a half-started one.
+    assert_eq!(client.send_command(&["PING"])?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_keys_is_empty_on_a_server_started_without_an_rdb_file() -> Result<()> {
+    let server = ServerProcess::start_master(find_free_port());
+    let mut client = server.client();
+
+    assert_eq!(client.send_command_json(&["KEYS", "*"])?, "[]");
+    Ok(())
+}
+
+#[test]
+fn test_keys_matches_a_glob_pattern_rather_than_a_prefix() -> Result<()> {
+    let (server, _dir) = server_loaded_from_rdb(&[("foo", "1"), ("bar", "2"), ("baz", "3")]);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command_json(&["KEYS", "foo"])?, r#"["foo"]"#);
+    assert_eq!(client.send_command_json(&["KEYS", "f?o"])?, r#"["foo"]"#);
+    assert_eq!(client.send_command_json(&["KEYS", "ba[r]"])?, r#"["bar"]"#);
+    assert_eq!(client.send_command_json(&["KEYS", "nothing*"])?, "[]");
+    Ok(())
+}
+
+#[test]
+fn test_values_are_loaded_from_the_rdb_file_too() -> Result<()> {
+    // KEYS names the keys; the values came along with them.
+    let (server, _dir) = server_loaded_from_rdb(&[("foo", "bar")]);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["GET", "foo"])?, "bar");
+    Ok(())
+}
+
+#[test]
+fn test_keys_sees_what_was_written_after_the_rdb_file_was_loaded() -> Result<()> {
+    // A loaded database is a starting point, not a frozen one.
+    let (server, _dir) = server_loaded_from_rdb(&[("foo", "bar")]);
+    let mut client = server.client();
+
+    client.send_command(&["SET", "added", "later"])?;
+
+    let mut names: Vec<String> = client
+        .send_command(&["KEYS", "*"])?
+        .split(',')
+        .map(str::to_owned)
+        .collect();
+    names.sort();
+
+    assert_eq!(names, vec!["added", "foo"]);
+    Ok(())
+}
+
+#[test]
+fn test_server_starts_empty_rather_than_failing_on_a_corrupt_rdb_file() -> Result<()> {
+    // Real Redis refuses to start on a file it cannot read. Coming up with an
+    // empty database is the friendlier answer, and the important half is that
+    // the server comes up at all.
+    let dir = temp_dir();
+    write_file(&dir, RDB_FILENAME, b"this is not an RDB file at all");
+    let server = ServerProcess::start_master_with_rdb_file(find_free_port(), dir.path(), RDB_FILENAME);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["PING"])?, "PONG");
+    assert_eq!(client.send_command_json(&["KEYS", "*"])?, "[]");
     Ok(())
 }

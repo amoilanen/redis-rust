@@ -320,7 +320,7 @@ impl FakeMaster {
         replica.write_raw(b"+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n")?;
 
         // A bulk string without the trailing \r\n, as a master sends it.
-        let snapshot = Storage::new(HashMap::new()).to_rdb()?;
+        let snapshot = Storage::new(HashMap::new()).as_rdb_bytes()?;
         replica.write_raw(format!("${}\r\n", snapshot.len()).as_bytes())?;
         replica.write_raw(&snapshot)?;
 
