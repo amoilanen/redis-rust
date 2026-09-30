@@ -9,18 +9,22 @@ use std::convert::identity;
 
 use log::*;
 
-use super::{expect_no_arguments, TransactionSlot};
+use super::expect_no_arguments;
 use crate::commands::{RedisCommand, command};
+use crate::connection::ConnectionState;
 use crate::error::RedisError;
 use crate::protocol::{self, DataType};
-use crate::server_state::{ReplicaSlot, ServerState};
+use crate::server_state::ServerState;
 use crate::storage::Storage;
 
 /// EXEC command implementation.
 pub struct Exec {
     pub message: DataType,
-    pub transaction: Arc<TransactionSlot>,
-    pub replica: Arc<ReplicaSlot>,
+    /// The connection EXEC arrived on, whole rather than one slot of it: the
+    /// queued commands are rebuilt for this connection, and any of them may
+    /// want any part of its state - a queued SUBSCRIBE subscribes it, a queued
+    /// MULTI opens the next transaction on it.
+    pub connection_state: Arc<ConnectionState>,
     pub server_state: Arc<ServerState>
 }
 
@@ -28,7 +32,7 @@ impl RedisCommand for Exec {
     fn execute(&self, storage: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         expect_no_arguments(&self.message, "exec")?;
 
-        let Some(transaction) = self.transaction.take()? else {
+        let Some(transaction) = self.connection_state.transaction.take()? else {
             debug!("EXEC without MULTI");
             return Err(RedisError {
                 message: "ERR EXEC without MULTI".to_string(),
@@ -39,7 +43,7 @@ impl RedisCommand for Exec {
         let mut commands: Vec<Box<dyn RedisCommand>> = Vec::new();
         for received_message in transaction.queued().iter() {
             // Transaction is empty at this point (it was taken from), but it is OK to start a nested transaction on this connection if required
-            if let Some(command) = command::command_from_message(received_message, &self.server_state, &self.transaction, &self.replica)? {
+            if let Some(command) = command::command_from_message(received_message, &self.server_state, &self.connection_state)? {
                 commands.push(command);
             }
         }
@@ -89,13 +93,20 @@ impl RedisCommand for Exec {
 mod tests {
     use super::*;
     use crate::config::ServerOptions;
+    use crate::commands::transaction::TransactionSlot;
     use crate::commands::{client_error_message, command_message};
+    use crate::connection::ConnectionMode;
 
+    /// An EXEC on a client connection whose transaction slot is `transaction`
+    /// - the slot being what every test here sets up and asserts on.
     fn exec(parts: &[&str], transaction: &Arc<TransactionSlot>, server_state: &Arc<ServerState>) -> Exec {
+        let connection = ConnectionState {
+            transaction: Arc::clone(transaction),
+            ..ConnectionState::new(ConnectionMode::ConnectedClient)
+        };
         Exec {
             message: command_message(parts),
-            transaction: Arc::clone(transaction),
-            replica: Arc::new(ReplicaSlot::new()),
+            connection_state: Arc::new(connection),
             server_state: Arc::clone(server_state)
         }
     }

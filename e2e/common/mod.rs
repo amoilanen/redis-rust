@@ -19,6 +19,10 @@ mod server;
 // `RespClient` through `ServerProcess::client` rather than by name.
 #[allow(unused_imports)]
 pub use client::RespClient;
+// The expected side of a `send_command_resp` assertion, for the suites that
+// pin the wire type of a reply.
+#[allow(unused_imports)]
+pub use client::{array, bulk, int, null_array, null_bulk, simple, RespValue};
 pub use port::find_free_port;
 // Only the basic-commands suite loads an RDB file, and it reaches the fixture
 // through `server_loaded_from_rdb` rather than building one itself.

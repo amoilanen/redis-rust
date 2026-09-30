@@ -6,7 +6,10 @@
 mod common;
 
 use anyhow::Result;
-use common::{find_free_port, server_loaded_from_rdb, temp_dir, write_file, ServerProcess, RDB_FILENAME};
+use common::{
+    array, bulk, find_free_port, int, server_loaded_from_rdb, temp_dir, write_file, ServerProcess,
+    RDB_FILENAME,
+};
 use std::thread;
 use std::time::Duration;
 
@@ -719,12 +722,14 @@ fn server_with_rdb_file() -> ServerProcess {
 
 #[test]
 fn test_config_get_dir_returns_the_configured_directory() -> Result<()> {
+    // Compared as parsed RESP rather than JSON: the tester wants bulk strings,
+    // and the JSON rendering would pass simple ones too.
     let server = server_with_rdb_file();
     let mut client = server.client();
 
-    let resp = client.send_command_json(&["CONFIG", "GET", "dir"])?;
+    let resp = client.send_command_resp(&["CONFIG", "GET", "dir"])?;
 
-    assert_eq!(resp, r#"["dir","/tmp/redis-files"]"#);
+    assert_eq!(resp, array(vec![bulk("dir"), bulk("/tmp/redis-files")]));
     Ok(())
 }
 
@@ -736,21 +741,6 @@ fn test_config_get_dbfilename_returns_the_configured_file_name() -> Result<()> {
     let resp = client.send_command_json(&["CONFIG", "GET", "dbfilename"])?;
 
     assert_eq!(resp, r#"["dbfilename","dump.rdb"]"#);
-    Ok(())
-}
-
-#[test]
-fn test_config_get_answers_in_bulk_strings() -> Result<()> {
-    // The exact bytes the tester matches on - an array of two bulk strings,
-    // not simple ones, which the parsed rendering above cannot tell apart.
-    let server = server_with_rdb_file();
-    let mut client = server.client();
-    let expected = "*2\r\n$3\r\ndir\r\n$16\r\n/tmp/redis-files\r\n";
-
-    client.write_command(&["CONFIG", "GET", "dir"])?;
-    let resp = client.read_raw(expected.len())?;
-
-    assert_eq!(String::from_utf8(resp)?, expected);
     Ok(())
 }
 
@@ -813,27 +803,14 @@ fn test_config_keeps_serving_after_an_unsupported_subcommand() -> Result<()> {
 
 #[test]
 fn test_keys_returns_the_single_key_in_the_rdb_file() -> Result<()> {
+    // Compared as parsed RESP rather than JSON: the tester wants an array of
+    // bulk strings, and the JSON rendering would pass simple ones too.
     let (server, _dir) = server_loaded_from_rdb(&[("foo", "bar")]);
     let mut client = server.client();
 
-    let resp = client.send_command_json(&["KEYS", "*"])?;
+    let resp = client.send_command_resp(&["KEYS", "*"])?;
 
-    assert_eq!(resp, r#"["foo"]"#);
-    Ok(())
-}
-
-#[test]
-fn test_keys_answers_in_an_array_of_bulk_strings() -> Result<()> {
-    // The exact bytes the tester matches on, which the parsed rendering above
-    // cannot tell from an array of simple strings.
-    let (server, _dir) = server_loaded_from_rdb(&[("foo", "bar")]);
-    let mut client = server.client();
-    let expected = "*1\r\n$3\r\nfoo\r\n";
-
-    client.write_command(&["KEYS", "*"])?;
-    let resp = client.read_raw(expected.len())?;
-
-    assert_eq!(String::from_utf8(resp)?, expected);
+    assert_eq!(resp, array(vec![bulk("foo")]));
     Ok(())
 }
 
@@ -932,5 +909,47 @@ fn test_server_starts_empty_rather_than_failing_on_a_corrupt_rdb_file() -> Resul
 
     assert_eq!(client.send_command(&["PING"])?, "PONG");
     assert_eq!(client.send_command_json(&["KEYS", "*"])?, "[]");
+    Ok(())
+}
+
+// ========================= SUBSCRIBE =========================
+
+#[test]
+fn test_subscribe_confirms_the_channel_and_the_count() -> Result<()> {
+    // Compared as parsed RESP rather than JSON: the tester wants `subscribe`
+    // and the channel as bulk strings, and the JSON rendering would pass
+    // simple ones too.
+    let port = find_free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    let resp = client.send_command_resp(&["SUBSCRIBE", "foo"])?;
+
+    assert_eq!(resp, array(vec![bulk("subscribe"), bulk("foo"), int(1)]));
+    Ok(())
+}
+
+#[test]
+fn test_subscribe_counts_the_channels_of_the_connection_it_arrived_on() -> Result<()> {
+    // Each client counts its own subscriptions: the second client's first
+    // SUBSCRIBE reports 1, however many channels the first one has taken.
+    let port = find_free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(
+        client.send_command_json(&["SUBSCRIBE", "foo"])?,
+        r#"["subscribe","foo",1]"#
+    );
+    assert_eq!(
+        client.send_command_json(&["SUBSCRIBE", "bar"])?,
+        r#"["subscribe","bar",2]"#
+    );
+
+    let mut other_client = server.client();
+    assert_eq!(
+        other_client.send_command_json(&["SUBSCRIBE", "baz"])?,
+        r#"["subscribe","baz",1]"#
+    );
     Ok(())
 }

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use crate::protocol::{self, DataType};
 use crate::error::RedisError;
 use crate::io;
-use crate::commands::{command, transaction::TransactionSlot};
+use crate::commands::{command, pubsub::Subscriptions, transaction::TransactionSlot};
 use crate::storage::Storage;
 use crate::server_state::{ReplicaSlot, ServerState};
 
@@ -40,6 +40,50 @@ impl ConnectionMode {
     }
 }
 
+/// Everything one connection owns for as long as it lasts.
+///
+/// Created when the connection is accepted and dropped when it ends, which is
+/// the whole lifecycle: a disconnect discards the open transaction and the
+/// channels the client subscribed to for free, with no server-wide registry to
+/// unregister from. The one thing other connections must reach - a replica's
+/// socket - is registered separately on `ServerState`, and pruned there when a
+/// write to it fails.
+///
+/// Each field keeps an `Arc` of its own rather than the state being shared
+/// whole: `build_command` hands a command only the slot it works on, so a
+/// command's fields still say which connection state it reaches for.
+pub struct ConnectionState {
+    /// Who is on the other end, which decides whether replies are sent and
+    /// whether the peer's commands count towards the replication offset.
+    pub mode: ConnectionMode,
+    /// The at-most-one transaction opened by MULTI.
+    pub transaction: Arc<TransactionSlot>,
+    /// Empty until this connection turns out to be a replica's, which a PSYNC
+    /// sent by the replica decides.
+    pub replica: Arc<ReplicaSlot>,
+    /// The channels SUBSCRIBE has taken on this connection.
+    pub subscriptions: Arc<Subscriptions>,
+}
+
+impl ConnectionState {
+    pub fn new(mode: ConnectionMode) -> Self {
+        ConnectionState {
+            mode,
+            transaction: Arc::new(TransactionSlot::new()),
+            replica: Arc::new(ReplicaSlot::new()),
+            subscriptions: Arc::new(Subscriptions::new()),
+        }
+    }
+
+    fn should_reply(&self) -> bool {
+        self.mode.should_reply()
+    }
+
+    fn counts_replication_offset(&self) -> bool {
+        self.mode.counts_replication_offset()
+    }
+}
+
 /// Handles a single connection.
 ///
 /// This function:
@@ -64,12 +108,8 @@ pub fn handle_connection(
 ) -> Result<(), anyhow::Error> {
     debug!("accepted new connection");
 
-    // Per-connection, not on `ServerState`: a disconnect discards any open
-    // transaction, as Redis does.
-    let transaction = Arc::new(TransactionSlot::new());
-    // Empty until this connection turns out to be a replica's, which a PSYNC sent by the replica
-    // decides below.
-    let replica = Arc::new(ReplicaSlot::new());
+    // Owned here, so it lives exactly as long as the connection does.
+    let connection_state = Arc::new(ConnectionState::new(role));
 
     loop {
         let received_messages: Vec<(DataType, usize)> = io::read_messages_with_lengths(stream)?;
@@ -80,18 +120,11 @@ pub fn handle_connection(
             );
             match &received_message {
                 DataType::Array { elements: _ } => {
-                    handle_command(
-                        stream,
-                        &received_message,
-                        server_state,
-                        &transaction,
-                        &replica,
-                        role,
-                    )?;
+                    handle_command(stream, &received_message, server_state, &connection_state)?;
                     // After handling, so a REPLCONF GETACK reports the offset
                     // as it stood before that request - the request itself is
                     // only counted towards the next acknowledgement.
-                    if role.counts_replication_offset() {
+                    if connection_state.counts_replication_offset() {
                         server_state.advance_replication_offset(message_length);
                     }
                 }
@@ -113,16 +146,11 @@ fn handle_command(
     stream: &mut TcpStream,
     received_message: &DataType,
     server_state: &Arc<ServerState>,
-    transaction: &Arc<TransactionSlot>,
-    replica: &Arc<ReplicaSlot>,
-    role: ConnectionMode,
+    connection_state: &Arc<ConnectionState>,
 ) -> Result<(), anyhow::Error> {
-    let Some(command) = command::command_from_message(
-        received_message,
-        server_state,
-        transaction,
-        replica,
-    )? else {
+    let Some(command) =
+        command::command_from_message(received_message, server_state, connection_state)?
+    else {
         return Ok(());
     };
     let command_name = command.name();
@@ -132,16 +160,16 @@ fn handle_command(
     // Queueing after `build_command` keeps an unrecognised command ignored the
     // same way it is outside a transaction, instead of filling the queue with
     // something EXEC could never run.
-    if transaction.queue(&command_name, received_message)? {
+    if connection_state.transaction.queue(&command_name, received_message)? {
         debug!("Queued {} in the open transaction", command_name);
-        if role.should_reply() {
+        if connection_state.should_reply() {
             send_reply(stream, vec![protocol::simple_string("QUEUED")])?;
         }
         return Ok(());
     }
 
     if command_name == "PSYNC" {
-        replica.fill(server_state.register_replica(stream)?)?;
+        connection_state.replica.fill(server_state.register_replica(stream)?)?;
     }
 
     let reply = match command.execute(server_state.storage()) {
@@ -151,7 +179,7 @@ fn handle_command(
         // failed write is never propagated to replicas.
         Err(error) => match error.downcast::<RedisError>() {
             Ok(redis_error) => {
-                if role.should_reply() || command.should_always_reply() {
+                if connection_state.should_reply() || command.should_always_reply() {
                     send_reply(stream, vec![protocol::simple_error(&redis_error.message)])?;
                 }
                 return Ok(());
@@ -160,7 +188,7 @@ fn handle_command(
         },
     };
 
-    if role.should_reply() || command.should_always_reply() {
+    if connection_state.should_reply() || command.should_always_reply() {
         send_reply(stream, reply)?;
     }
 

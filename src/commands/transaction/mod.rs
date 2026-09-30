@@ -40,9 +40,9 @@ impl Transaction {
 
 /// The at-most-one transaction open on a connection.
 ///
-/// Owned by `connection::handle_connection`, so an open transaction dies with
-/// the client that opened it. The `Mutex` is internal because commands only get
-/// `&self` in `RedisCommand::execute`.
+/// Held by the connection's [`ConnectionState`](crate::connection::ConnectionState),
+/// so an open transaction dies with the client that opened it. The `Mutex` is
+/// internal because commands only get `&self` in `RedisCommand::execute`.
 pub struct TransactionSlot {
     open: Mutex<Option<Transaction>>,
 }

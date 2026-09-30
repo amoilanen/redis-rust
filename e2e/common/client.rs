@@ -10,12 +10,49 @@ use std::time::Duration;
 /// [`read_response`](RespClient::read_response) and
 /// [`read_response_json`](RespClient::read_response_json) can share a single
 /// I/O path and only differ in how they render the result.
-enum RespValue {
+///
+/// Public so a test can assert on a reply as is, through
+/// [`send_command_resp`](RespClient::send_command_resp): unlike the rendered
+/// forms it keeps a simple string apart from a bulk one, and a null bulk string
+/// apart from a null array. Build the expected value with [`simple`], [`bulk`],
+/// [`int`], [`array`], [`null_bulk`] and [`null_array`].
+#[derive(Debug, PartialEq)]
+pub enum RespValue {
     SimpleString(String),
     Error(String),
-    Integer(String),
+    Integer(i64),
     BulkString(Option<String>), // None = null ($-1)
     Array(Option<Vec<RespValue>>), // None = null (*-1)
+}
+
+/// A simple string: `+<value>\r\n`.
+pub fn simple(value: &str) -> RespValue {
+    RespValue::SimpleString(value.to_string())
+}
+
+/// A bulk string: `$<len>\r\n<value>\r\n`.
+pub fn bulk(value: &str) -> RespValue {
+    RespValue::BulkString(Some(value.to_string()))
+}
+
+/// An integer: `:<value>\r\n`.
+pub fn int(value: i64) -> RespValue {
+    RespValue::Integer(value)
+}
+
+/// An array: `*<len>\r\n` followed by its elements.
+pub fn array(items: Vec<RespValue>) -> RespValue {
+    RespValue::Array(Some(items))
+}
+
+/// The null bulk string: `$-1\r\n`.
+pub fn null_bulk() -> RespValue {
+    RespValue::BulkString(None)
+}
+
+/// The null array: `*-1\r\n`.
+pub fn null_array() -> RespValue {
+    RespValue::Array(None)
 }
 
 /// Whoever sends commands and reads replies over a RESP2 connection.
@@ -109,6 +146,18 @@ impl RespClient {
         self.read_response_json()
     }
 
+    /// Send a command and return the reply as the parsed [`RespValue`].
+    ///
+    /// The strictest of the readers: where [`send_command_json`](Self::send_command_json)
+    /// renders simple and bulk strings alike, this keeps every RESP type
+    /// apart, for a test that cares about the wire type of a reply - that
+    /// `CONFIG GET` answers in bulk strings rather than simple ones, say.
+    /// An error reply comes back as [`RespValue::Error`], not as `Err`.
+    pub fn send_command_resp(&mut self, args: &[&str]) -> anyhow::Result<RespValue> {
+        self.write_command(args)?;
+        self.read_resp()
+    }
+
     /// Read a single RESP response from the stream.
     ///
     /// Returns the response as a plain `String`.  Null bulk strings and null
@@ -141,23 +190,12 @@ impl RespClient {
         }
     }
 
-    /// Read the next `count` bytes of the reply verbatim, ahead of any
-    /// parsing.
-    ///
-    /// For a test that cares about the exact wire form of a reply - that
-    /// `CONFIG GET` answers in bulk strings rather than simple ones, say -
-    /// which the parsed renderings above deliberately smooth over.
-    pub fn read_raw(&mut self, count: usize) -> anyhow::Result<Vec<u8>> {
-        let mut bytes = vec![0u8; count];
-        self.reader.read_exact(&mut bytes)?;
-        Ok(bytes)
-    }
-
     /// Parse one RESP2 frame from the stream into a [`RespValue`].
     ///
     /// This is the single source of wire-reading logic shared by
-    /// [`read_response`](Self::read_response) and
-    /// [`read_response_json`](Self::read_response_json).
+    /// [`read_response`](Self::read_response),
+    /// [`read_response_json`](Self::read_response_json) and
+    /// [`send_command_resp`](Self::send_command_resp).
     fn read_resp(&mut self) -> anyhow::Result<RespValue> {
         let mut line = String::new();
         self.reader.read_line(&mut line)?;
@@ -173,7 +211,7 @@ impl RespClient {
         match prefix {
             "+" => Ok(RespValue::SimpleString(payload.to_string())),
             "-" => Ok(RespValue::Error(payload.to_string())),
-            ":" => Ok(RespValue::Integer(payload.to_string())),
+            ":" => Ok(RespValue::Integer(payload.parse()?)),
             "$" => {
                 let len: i64 = payload.parse()?;
                 if len < 0 {
@@ -212,7 +250,7 @@ fn resp_to_plain(value: RespValue) -> anyhow::Result<String> {
     match value {
         RespValue::SimpleString(s) | RespValue::BulkString(Some(s)) => Ok(s),
         RespValue::Error(e) => Err(anyhow::anyhow!("{}", e)),
-        RespValue::Integer(n) => Ok(n),
+        RespValue::Integer(n) => Ok(n.to_string()),
         RespValue::BulkString(None) | RespValue::Array(None) => Ok("(nil)".to_string()),
         RespValue::Array(Some(items)) => items
             .into_iter()
@@ -233,7 +271,7 @@ fn resp_to_json(value: RespValue) -> anyhow::Result<String> {
     match value {
         RespValue::SimpleString(s) => Ok(json_string(&s)),
         RespValue::Error(e) => Err(anyhow::anyhow!("{}", e)),
-        RespValue::Integer(n) => Ok(n),
+        RespValue::Integer(n) => Ok(n.to_string()),
         RespValue::BulkString(None) | RespValue::Array(None) => Ok("null".to_string()),
         RespValue::BulkString(Some(s)) => Ok(json_string(&s)),
         RespValue::Array(Some(items)) => items
