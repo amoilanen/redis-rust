@@ -738,9 +738,9 @@ fn test_config_get_dbfilename_returns_the_configured_file_name() -> Result<()> {
     let server = server_with_rdb_file();
     let mut client = server.client();
 
-    let resp = client.send_command_json(&["CONFIG", "GET", "dbfilename"])?;
+    let resp = client.send_command_resp(&["CONFIG", "GET", "dbfilename"])?;
 
-    assert_eq!(resp, r#"["dbfilename","dump.rdb"]"#);
+    assert_eq!(resp, array(vec![bulk("dbfilename"), bulk("dump.rdb")]));
     Ok(())
 }
 
@@ -752,12 +752,12 @@ fn test_config_get_both_parameters_on_one_connection() -> Result<()> {
     let mut client = server.client();
 
     assert_eq!(
-        client.send_command_json(&["CONFIG", "GET", "dir"])?,
-        r#"["dir","/tmp/redis-files"]"#
+        client.send_command_resp(&["CONFIG", "GET", "dir"])?,
+        array(vec![bulk("dir"), bulk("/tmp/redis-files")])
     );
     assert_eq!(
-        client.send_command_json(&["CONFIG", "GET", "dbfilename"])?,
-        r#"["dbfilename","dump.rdb"]"#
+        client.send_command_resp(&["CONFIG", "GET", "dbfilename"])?,
+        array(vec![bulk("dbfilename"), bulk("dump.rdb")])
     );
     Ok(())
 }
@@ -768,10 +768,10 @@ fn test_config_get_leaves_out_a_parameter_the_server_has_no_value_for() -> Resul
     let server = ServerProcess::start_master(find_free_port());
     let mut client = server.client();
 
-    assert_eq!(client.send_command_json(&["CONFIG", "GET", "dir"])?, "[]");
+    assert_eq!(client.send_command_resp(&["CONFIG", "GET", "dir"])?, array(vec![]));
     assert_eq!(
-        client.send_command_json(&["CONFIG", "GET", "maxmemory"])?,
-        "[]"
+        client.send_command_resp(&["CONFIG", "GET", "maxmemory"])?,
+        array(vec![])
     );
     Ok(())
 }
@@ -793,8 +793,8 @@ fn test_config_keeps_serving_after_an_unsupported_subcommand() -> Result<()> {
         error
     );
     assert_eq!(
-        client.send_command_json(&["CONFIG", "GET", "dir"])?,
-        r#"["dir","/tmp/redis-files"]"#
+        client.send_command_resp(&["CONFIG", "GET", "dir"])?,
+        array(vec![bulk("dir"), bulk("/tmp/redis-files")])
     );
     Ok(())
 }
@@ -841,7 +841,7 @@ fn test_keys_is_empty_when_the_rdb_file_does_not_exist() -> Result<()> {
     let server = ServerProcess::start_master_with_rdb_file(find_free_port(), dir.path(), RDB_FILENAME);
     let mut client = server.client();
 
-    assert_eq!(client.send_command_json(&["KEYS", "*"])?, "[]");
+    assert_eq!(client.send_command_resp(&["KEYS", "*"])?, array(vec![]));
     // And it is a working server, not a half-started one.
     assert_eq!(client.send_command(&["PING"])?, "PONG");
     Ok(())
@@ -852,7 +852,7 @@ fn test_keys_is_empty_on_a_server_started_without_an_rdb_file() -> Result<()> {
     let server = ServerProcess::start_master(find_free_port());
     let mut client = server.client();
 
-    assert_eq!(client.send_command_json(&["KEYS", "*"])?, "[]");
+    assert_eq!(client.send_command_resp(&["KEYS", "*"])?, array(vec![]));
     Ok(())
 }
 
@@ -861,10 +861,10 @@ fn test_keys_matches_a_glob_pattern_rather_than_a_prefix() -> Result<()> {
     let (server, _dir) = server_loaded_from_rdb(&[("foo", "1"), ("bar", "2"), ("baz", "3")]);
     let mut client = server.client();
 
-    assert_eq!(client.send_command_json(&["KEYS", "foo"])?, r#"["foo"]"#);
-    assert_eq!(client.send_command_json(&["KEYS", "f?o"])?, r#"["foo"]"#);
-    assert_eq!(client.send_command_json(&["KEYS", "ba[r]"])?, r#"["bar"]"#);
-    assert_eq!(client.send_command_json(&["KEYS", "nothing*"])?, "[]");
+    assert_eq!(client.send_command_resp(&["KEYS", "foo"])?, array(vec![bulk("foo")]));
+    assert_eq!(client.send_command_resp(&["KEYS", "f?o"])?, array(vec![bulk("foo")]));
+    assert_eq!(client.send_command_resp(&["KEYS", "ba[r]"])?, array(vec![bulk("bar")]));
+    assert_eq!(client.send_command_resp(&["KEYS", "nothing*"])?, array(vec![]));
     Ok(())
 }
 
@@ -908,7 +908,7 @@ fn test_server_starts_empty_rather_than_failing_on_a_corrupt_rdb_file() -> Resul
     let mut client = server.client();
 
     assert_eq!(client.send_command(&["PING"])?, "PONG");
-    assert_eq!(client.send_command_json(&["KEYS", "*"])?, "[]");
+    assert_eq!(client.send_command_resp(&["KEYS", "*"])?, array(vec![]));
     Ok(())
 }
 

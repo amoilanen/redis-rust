@@ -115,10 +115,15 @@ mod tests {
         }
     }
 
-    /// The reply's elements, which are always a single array.
-    fn pairs(reply: Vec<DataType>) -> Vec<String> {
-        assert_eq!(reply.len(), 1, "CONFIG GET replies with one array");
-        reply[0].as_string_vec().unwrap()
+    /// The CONFIG GET reply for `pairs`: one array alternating name and value.
+    /// Compared as typed values, not strings, because the tester reads them
+    /// as bulk strings byte for byte.
+    fn bulk_pairs(pairs: &[(&str, &str)]) -> Vec<DataType> {
+        let elements = pairs
+            .iter()
+            .flat_map(|(name, value)| [protocol::bulk_string(name), protocol::bulk_string(value)])
+            .collect();
+        vec![protocol::array(elements)]
     }
 
     #[test]
@@ -127,7 +132,7 @@ mod tests {
 
         let reply = default_config_command(&["CONFIG", "GET", "dir"]).execute(&storage)?;
 
-        assert_eq!(pairs(reply), vec!["dir", "/tmp/redis-files"]);
+        assert_eq!(reply, bulk_pairs(&[("dir", "/tmp/redis-files")]));
         Ok(())
     }
 
@@ -137,25 +142,7 @@ mod tests {
 
         let reply = default_config_command(&["CONFIG", "GET", "dbfilename"]).execute(&storage)?;
 
-        assert_eq!(pairs(reply), vec!["dbfilename", "dump.rdb"]);
-        Ok(())
-    }
-
-    #[test]
-    fn should_reply_with_bulk_strings() -> anyhow::Result<()> {
-        // The tester reads the reply as bulk strings, byte for byte:
-        // *2\r\n$3\r\ndir\r\n$16\r\n/tmp/redis-files\r\n
-        let storage = create_test_storage();
-
-        let reply = default_config_command(&["CONFIG", "GET", "dir"]).execute(&storage)?;
-
-        assert_eq!(
-            reply[0],
-            protocol::array(vec![
-                protocol::bulk_string("dir"),
-                protocol::bulk_string("/tmp/redis-files"),
-            ])
-        );
+        assert_eq!(reply, bulk_pairs(&[("dbfilename", "dump.rdb")]));
         Ok(())
     }
 
@@ -166,7 +153,7 @@ mod tests {
         let reply = default_config_command(&["CONFIG", "GET", "DIR"]).execute(&storage)?;
 
         // Looked up case-insensitively, but echoed back as it was asked for.
-        assert_eq!(pairs(reply), vec!["DIR", "/tmp/redis-files"]);
+        assert_eq!(reply, bulk_pairs(&[("DIR", "/tmp/redis-files")]));
         Ok(())
     }
 
@@ -177,8 +164,8 @@ mod tests {
         let reply = default_config_command(&["CONFIG", "GET", "dbfilename", "dir"]).execute(&storage)?;
 
         assert_eq!(
-            pairs(reply),
-            vec!["dbfilename", "dump.rdb", "dir", "/tmp/redis-files"]
+            reply,
+            bulk_pairs(&[("dbfilename", "dump.rdb"), ("dir", "/tmp/redis-files")])
         );
         Ok(())
     }
@@ -190,7 +177,7 @@ mod tests {
         let reply = default_config_command(&["CONFIG", "GET", "maxmemory"]).execute(&storage)?;
 
         // An empty array, not an error: CONFIG GET reports what is set.
-        assert_eq!(pairs(reply), Vec::<String>::new());
+        assert_eq!(reply, vec![protocol::array(vec![])]);
         Ok(())
     }
 
@@ -201,7 +188,7 @@ mod tests {
         let reply =
             default_config_command(&["CONFIG", "GET", "maxmemory", "dir", "appendonly"]).execute(&storage)?;
 
-        assert_eq!(pairs(reply), vec!["dir", "/tmp/redis-files"]);
+        assert_eq!(reply, bulk_pairs(&[("dir", "/tmp/redis-files")]));
         Ok(())
     }
 
@@ -217,7 +204,7 @@ mod tests {
 
         let reply = command.execute(&storage)?;
 
-        assert_eq!(pairs(reply), Vec::<String>::new());
+        assert_eq!(reply, vec![protocol::array(vec![])]);
         Ok(())
     }
 

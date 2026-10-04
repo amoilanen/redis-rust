@@ -113,8 +113,7 @@ mod tests {
         )));
         let result = cmd.execute(&storage).unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].as_string().unwrap(), "OK");
+        assert_eq!(result, vec![protocol::simple_string("OK")]);
         assert!(!cmd.is_propagated_to_replicas());
     }
 }

@@ -88,8 +88,7 @@ mod tests {
         let storage = create_test_storage();
         let result = cmd.execute(&storage)?;
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].as_string()?, "OK");
+        assert_eq!(result, vec![protocol::simple_string("OK")]);
         assert!(cmd.is_propagated_to_replicas());
 
         // Verify data was stored
@@ -107,7 +106,7 @@ mod tests {
         let storage = create_test_storage();
         let result = cmd.execute(&storage)?;
 
-        assert_eq!(result[0].as_string()?, "OK");
+        assert_eq!(result, vec![protocol::simple_string("OK")]);
 
         // Immediately after set, key should exist
         let mut data = storage.lock().map_err(|_| "Failed to lock storage".to_string())?;

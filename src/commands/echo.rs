@@ -62,8 +62,7 @@ mod tests {
         let storage = create_test_storage();
         let result = cmd.execute(&storage).unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].as_string().unwrap(), "Hello World");
+        assert_eq!(result, vec![protocol::bulk_string("Hello World")]);
     }
 
     #[test]

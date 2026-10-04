@@ -78,8 +78,7 @@ mod tests {
         for (i, value) in values.iter().enumerate() {
             let cmd = lpush(lpush_msg("mylist", &[value]), &notifier);
             let result = cmd.execute(&storage)?;
-            assert_eq!(result.len(), 1);
-            assert_eq!(result[0].as_string()?, (i + 1).to_string());
+            assert_eq!(result, vec![protocol::integer(i as i64 + 1)]);
             assert!(cmd.is_propagated_to_replicas());
         }
 
@@ -98,8 +97,7 @@ mod tests {
         // Create new list with multiple elements - they should be inserted in
         // reverse order, so "a", "b", "c" becomes ["c", "b", "a"].
         let result1 = lpush(lpush_msg("mylist", &["a", "b", "c"]), &notifier).execute(&storage)?;
-        assert_eq!(result1.len(), 1);
-        assert_eq!(result1[0].as_string()?, "3");
+        assert_eq!(result1, vec![protocol::integer(3)]);
 
         assert_eq!(
             read_list(&storage, "mylist")?,
@@ -108,8 +106,7 @@ mod tests {
 
         // Prepend more elements to existing list. "d", "e" -> head becomes ["e", "d", ...].
         let result2 = lpush(lpush_msg("mylist", &["d", "e"]), &notifier).execute(&storage)?;
-        assert_eq!(result2.len(), 1);
-        assert_eq!(result2[0].as_string()?, "5");
+        assert_eq!(result2, vec![protocol::integer(5)]);
 
         assert_eq!(
             read_list(&storage, "mylist")?,
@@ -153,12 +150,12 @@ mod tests {
 
         // Single push to a fresh key
         let r1 = lpush(lpush_msg("k", &["c"]), &notifier).execute(&storage)?;
-        assert_eq!(r1[0].as_string()?, "1");
+        assert_eq!(r1, vec![protocol::integer(1)]);
         assert_eq!(read_list(&storage, "k")?, vec!["c"]);
 
         // Multi push - "b", "a" should be inserted as head ["a", "b", ...]
         let r2 = lpush(lpush_msg("k", &["b", "a"]), &notifier).execute(&storage)?;
-        assert_eq!(r2[0].as_string()?, "3");
+        assert_eq!(r2, vec![protocol::integer(3)]);
         assert_eq!(read_list(&storage, "k")?, vec!["a", "b", "c"]);
         Ok(())
     }

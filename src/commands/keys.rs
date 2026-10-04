@@ -86,20 +86,21 @@ mod tests {
         Keys { message: command_message(&["KEYS", pattern]) }
     }
 
-    /// The key names a `KEYS <pattern>` reply holds, sorted: the keyspace is a
-    /// hash map, so the order they come back in is not a property worth
-    /// asserting on.
-    fn matched(storage: &Mutex<Storage>, pattern: &str) -> anyhow::Result<Vec<String>> {
-        let reply = keys(pattern).execute(storage)?;
-        assert_eq!(reply.len(), 1, "KEYS replies with exactly one array");
+    /// The `KEYS <pattern>` reply with its array's elements sorted: the
+    /// keyspace is a hash map, so the order they come back in is not a
+    /// property worth asserting on.
+    fn matched(storage: &Mutex<Storage>, pattern: &str) -> anyhow::Result<Vec<DataType>> {
+        let mut reply = keys(pattern).execute(storage)?;
+        if let [DataType::Array { elements }] = reply.as_mut_slice() {
+            elements.sort_by_key(|element| element.as_string().ok());
+        }
+        Ok(reply)
+    }
 
-        let mut names: Vec<String> = reply[0]
-            .as_vec()?
-            .iter()
-            .map(|element| element.as_string())
-            .collect::<Result<_, _>>()?;
-        names.sort();
-        Ok(names)
+    /// A KEYS reply naming `names`. Compared as typed values, not strings,
+    /// because the key names must come back as bulk strings.
+    fn key_names(names: &[&str]) -> Vec<DataType> {
+        vec![protocol::array(names.iter().map(|name| protocol::bulk_string(name)).collect())]
     }
 
     // ----------------------------------------------------------------- KEYS
@@ -108,7 +109,7 @@ mod tests {
     fn should_answer_an_empty_database_with_an_empty_array() -> anyhow::Result<()> {
         let storage = create_test_storage();
 
-        assert_eq!(matched(&storage, "*")?, Vec::<String>::new());
+        assert_eq!(matched(&storage, "*")?, key_names(&[]));
         Ok(())
     }
 
@@ -119,7 +120,7 @@ mod tests {
         set(&["SET", "bar", "2"]).execute(&storage)?;
         set(&["SET", "baz", "3"]).execute(&storage)?;
 
-        assert_eq!(matched(&storage, "*")?, vec!["bar", "baz", "foo"]);
+        assert_eq!(matched(&storage, "*")?, key_names(&["bar", "baz", "foo"]));
         Ok(())
     }
 
@@ -130,10 +131,10 @@ mod tests {
         set(&["SET", "bar", "2"]).execute(&storage)?;
         set(&["SET", "baz", "3"]).execute(&storage)?;
 
-        assert_eq!(matched(&storage, "ba*")?, vec!["bar", "baz"]);
-        assert_eq!(matched(&storage, "ba?")?, vec!["bar", "baz"]);
-        assert_eq!(matched(&storage, "ba[r]")?, vec!["bar"]);
-        assert_eq!(matched(&storage, "nothing*")?, Vec::<String>::new());
+        assert_eq!(matched(&storage, "ba*")?, key_names(&["bar", "baz"]));
+        assert_eq!(matched(&storage, "ba?")?, key_names(&["bar", "baz"]));
+        assert_eq!(matched(&storage, "ba[r]")?, key_names(&["bar"]));
+        assert_eq!(matched(&storage, "nothing*")?, key_names(&[]));
         Ok(())
     }
 
@@ -144,7 +145,7 @@ mod tests {
         set(&["SET", "fleeting", "2", "px", "1"]).execute(&storage)?;
         std::thread::sleep(std::time::Duration::from_millis(20));
 
-        assert_eq!(matched(&storage, "*")?, vec!["lasting"]);
+        assert_eq!(matched(&storage, "*")?, key_names(&["lasting"]));
         Ok(())
     }
 
@@ -153,7 +154,7 @@ mod tests {
         let storage = create_test_storage();
         set(&["SET", "later", "1", "px", "100000"]).execute(&storage)?;
 
-        assert_eq!(matched(&storage, "*")?, vec!["later"]);
+        assert_eq!(matched(&storage, "*")?, key_names(&["later"]));
         Ok(())
     }
 
@@ -169,7 +170,7 @@ mod tests {
         }
         .execute(&storage)?;
 
-        assert_eq!(matched(&storage, "*")?, vec!["a_stream", "a_string"]);
+        assert_eq!(matched(&storage, "*")?, key_names(&["a_stream", "a_string"]));
         Ok(())
     }
 

@@ -65,8 +65,7 @@ mod tests {
             let msg = command_message(&["RPUSH", "mylist", value]);
             let cmd = RPush { message: msg, notifier: Arc::clone(&notifier) };
             let result = cmd.execute(&storage)?;
-            assert_eq!(result.len(), 1);
-            assert_eq!(result[0].as_string()?, (i + 1).to_string());
+            assert_eq!(result, vec![protocol::integer(i as i64 + 1)]);
             assert!(cmd.is_propagated_to_replicas());
         }
         Ok(())
@@ -80,8 +79,7 @@ mod tests {
         // Create new list with multiple elements
         let msg1 = command_message(&["RPUSH", "mylist", "element1", "element2", "element3"]);
         let result1 = RPush { message: msg1, notifier: Arc::clone(&notifier) }.execute(&storage)?;
-        assert_eq!(result1.len(), 1);
-        assert_eq!(result1[0].as_string()?, "3");
+        assert_eq!(result1, vec![protocol::integer(3)]);
 
         // Verify the stored list contains exactly the three elements in order
         assert_eq!(
@@ -92,8 +90,7 @@ mod tests {
         // Append more elements to existing list
         let msg2 = command_message(&["RPUSH", "mylist", "element4", "element5"]);
         let result2 = RPush { message: msg2, notifier: Arc::clone(&notifier) }.execute(&storage)?;
-        assert_eq!(result2.len(), 1);
-        assert_eq!(result2[0].as_string()?, "5");
+        assert_eq!(result2, vec![protocol::integer(5)]);
 
         // Verify the stored list now contains all five elements in order
         assert_eq!(

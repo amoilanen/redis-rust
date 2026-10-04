@@ -76,8 +76,7 @@ mod tests {
 
         let result = cmd.execute(&storage).unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].as_string().unwrap(), "myvalue");
+        assert_eq!(result, vec![protocol::bulk_string("myvalue")]);
         assert!(!cmd.is_propagated_to_replicas());
     }
 
@@ -89,8 +88,9 @@ mod tests {
         let storage = create_test_storage();
         let result = cmd.execute(&storage).unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].as_string().unwrap(), "");
+        // The null bulk string, which reads as "" through as_string just as an
+        // empty value would: compared as a typed value to tell the two apart.
+        assert_eq!(result, vec![protocol::bulk_string_empty()]);
     }
 
     #[test]
@@ -110,14 +110,14 @@ mod tests {
 
         // Set a value
         let set_result = set(&["SET", "test_key", "test_value"]).execute(&storage).unwrap();
-        assert_eq!(set_result[0].as_string().unwrap(), "OK");
+        assert_eq!(set_result, vec![protocol::simple_string("OK")]);
 
         // Get the value
         let get_cmd = Get {
             message: command_message(&["GET", "test_key"]),
         };
         let get_result = get_cmd.execute(&storage).unwrap();
-        assert_eq!(get_result[0].as_string().unwrap(), "test_value");
+        assert_eq!(get_result, vec![protocol::bulk_string("test_value")]);
     }
 
     #[test]
@@ -162,7 +162,7 @@ mod tests {
                 message: get_message,
             };
             let result = get_cmd.execute(&storage).unwrap();
-            assert_eq!(result[0].as_string().unwrap(), format!("value{}", i));
+            assert_eq!(result, vec![protocol::bulk_string(&format!("value{}", i))]);
         }
     }
 }

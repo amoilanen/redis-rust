@@ -49,8 +49,7 @@ mod tests {
         let storage = create_test_storage();
         let result = cmd.execute(&storage).unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].as_string().unwrap(), "PONG");
+        assert_eq!(result, vec![protocol::simple_string("PONG")]);
         assert!(!cmd.is_propagated_to_replicas());
         assert!(!cmd.should_always_reply());
     }

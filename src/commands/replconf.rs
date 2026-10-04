@@ -129,6 +129,17 @@ mod tests {
         Ok((command, listener, link))
     }
 
+    /// The ACK a replica sends its master. Compared as typed values, not
+    /// strings: the master reads it as a command, an array of bulk strings,
+    /// and this reply has gone out as the wrong type before.
+    fn ack(offset: usize) -> Vec<DataType> {
+        vec![protocol::array(vec![
+            protocol::bulk_string("REPLCONF"),
+            protocol::bulk_string("ACK"),
+            protocol::bulk_string(&offset.to_string()),
+        ])]
+    }
+
     #[test]
     fn test_replconf_listening_port() {
         let server_state = Arc::new(ServerState::new(ServerOptions::initialize().with_port(6380)));
@@ -136,8 +147,7 @@ mod tests {
 
         let result = cmd.execute(&create_test_storage()).unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].as_string().unwrap(), "OK");
+        assert_eq!(result, vec![protocol::simple_string("OK")]);
         assert!(cmd.should_always_reply());
     }
 
@@ -148,9 +158,7 @@ mod tests {
 
         let result = cmd.execute(&create_test_storage()).unwrap();
 
-        assert_eq!(result.len(), 1);
-        let response = result[0].as_string_vec().unwrap();
-        assert_eq!(response, vec!["REPLCONF", "ACK", "0"]);
+        assert_eq!(result, ack(0));
     }
 
     #[test]
@@ -164,8 +172,7 @@ mod tests {
 
         let result = cmd.execute(&create_test_storage()).unwrap();
 
-        let response = result[0].as_string_vec().unwrap();
-        assert_eq!(response, vec!["REPLCONF", "ACK", &(first_offset + second_offset).to_string()]);
+        assert_eq!(result, ack(first_offset + second_offset));
     }
 
     #[test]

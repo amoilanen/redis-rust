@@ -145,7 +145,6 @@ mod tests {
         let result = exec(&["EXEC"], &open_transaction()?, &state).execute(storage)?;
 
         assert_eq!(result, vec![protocol::array(vec![])]);
-        assert_eq!(result[0].serialize(), b"*0\r\n");
         Ok(())
     }
 
