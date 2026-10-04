@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use crate::protocol::{self, DataType};
 use crate::error::RedisError;
 use crate::io;
-use crate::commands::{command, pubsub::Subscriptions, transaction::TransactionSlot};
+use crate::commands::{command, pubsub::{self, Subscriptions}, transaction::TransactionSlot};
 use crate::storage::Storage;
 use crate::server_state::{ReplicaSlot, ServerState};
 
@@ -154,6 +154,19 @@ fn handle_command(
         return Ok(());
     };
     let command_name = command.name();
+
+    // Subscribed mode limits a connection to managing its subscriptions. The
+    // check comes before queueing, as in Redis, so a transaction cannot be
+    // used to slip a forbidden command past it.
+    if connection_state.subscriptions.is_subscribed_mode()? {
+        if let Err(redis_error) = pubsub::ensure_allowed_in_subscribed_mode(command_name) {
+            debug!("Rejected {} in subscribed mode", command_name);
+            if connection_state.should_reply() {
+                send_reply(stream, vec![redis_error.as_protocol_error()])?;
+            }
+            return Ok(());
+        }
+    }
 
     // Inside a transaction a command is collected rather than run, so it must
     // not reach storage, the replicas, or - for PSYNC - the replica registry.
