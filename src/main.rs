@@ -11,7 +11,12 @@ use codecrafters_redis::replication;
 use codecrafters_redis::server_state::ServerState;
 
 fn main() -> Result<(), anyhow::Error> {
-    env_logger::init();
+    // Warnings are on unless RUST_LOG says otherwise. Each warn! reports
+    // something the user needs to know, like an RDB file that could not be
+    // read so the server started empty. env_logger's own default is
+    // error-only, which hid those. The default is "warn" rather than "info"
+    // so a normal start (including a missing RDB file) stays quiet.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     // Read once, up front: from here on the command line is the server's
     // options, which it carries for as long as it runs and answers CONFIG GET
