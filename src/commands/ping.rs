@@ -20,7 +20,7 @@ pub struct Ping {
 impl RedisCommand for Ping {
     fn execute(&self, _: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
         let resp = if self.subscriptions.is_subscribed_mode()? {
-            vec![protocol::array(vec![protocol::bulk_string("PONG"), protocol::bulk_string("")])]
+            vec![protocol::array(vec![protocol::bulk_string("pong"), protocol::bulk_string("")])]
         } else {
             vec![protocol::simple_string("PONG")]
         };
@@ -78,7 +78,7 @@ mod tests {
         let storage = create_test_storage();
         let result = cmd.execute(&storage).unwrap();
 
-        assert_eq!(result, vec![protocol::array(vec![protocol::bulk_string("PONG"), protocol::bulk_string("")])]);
+        assert_eq!(result, vec![protocol::array(vec![protocol::bulk_string("pong"), protocol::bulk_string("")])]);
         assert!(!cmd.is_propagated_to_replicas());
         assert!(!cmd.should_always_reply());
         Ok(())
