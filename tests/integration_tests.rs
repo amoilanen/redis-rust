@@ -30,7 +30,7 @@ fn create_test_storage() -> Arc<Mutex<Storage>> {
 #[test]
 fn e2e_ping_works() -> Result<()> {
     let message = protocol::array(vec![protocol::bulk_string("PING")]);
-    let cmd = Ping { message };
+    let cmd = Ping { message, subscriptions: Arc::new(pubsub::Subscriptions::new()) };
 
     let storage = create_test_storage();
     let result = cmd.execute(&storage)?;

@@ -68,7 +68,7 @@ fn build_command(
 
     let command: Box<dyn RedisCommand> = match command_name {
         "ECHO"      => Box::new(Echo { message }),
-        "PING"      => Box::new(Ping { message }),
+        "PING"      => Box::new(Ping { message, subscriptions: subscriptions() }),
         "SET"       => Box::new(Set { message }),
         "GET"       => Box::new(Get { message }),
         "INCR"      => Box::new(Incr { message }),

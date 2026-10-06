@@ -505,7 +505,9 @@ impl ServerState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::commands::pubsub::Subscriptions;
+
+use super::*;
     use std::net::TcpListener;
     use std::thread;
 
@@ -517,6 +519,7 @@ mod tests {
     fn ping() -> crate::commands::Ping {
         crate::commands::Ping {
             message: crate::protocol::array(vec![crate::protocol::bulk_string("PING")]),
+            subscriptions: Arc::new(Subscriptions::new())
         }
     }
 
