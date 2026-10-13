@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use crate::protocol::{self, DataType};
 use crate::error::RedisError;
 use crate::io;
-use crate::commands::{command, pubsub::{self, Subscriptions}, transaction::TransactionSlot};
+use crate::commands::{command, pubsub::{self, ChannelRegistry, Subscriptions}, transaction::TransactionSlot};
 use crate::storage::Storage;
 use crate::server_state::{ReplicaSlot, ServerState};
 
@@ -43,11 +43,11 @@ impl ConnectionMode {
 /// Everything one connection owns for as long as it lasts.
 ///
 /// Created when the connection is accepted and dropped when it ends, which is
-/// the whole lifecycle: a disconnect discards the open transaction and the
-/// channels the client subscribed to for free, with no server-wide registry to
-/// unregister from. The one thing other connections must reach - a replica's
-/// socket - is registered separately on `ServerState`, and pruned there when a
-/// write to it fails.
+/// the whole lifecycle: a disconnect discards the open transaction, and
+/// dropping the subscriptions counts the client out of the server's channel
+/// registry, with nothing to unregister by hand. The one other thing other
+/// connections must reach - a replica's socket - is registered separately on
+/// `ServerState`, and pruned there when a write to it fails.
 ///
 /// Each field keeps an `Arc` of its own rather than the state being shared
 /// whole: `build_command` hands a command only the slot it works on, so a
@@ -66,12 +66,14 @@ pub struct ConnectionState {
 }
 
 impl ConnectionState {
-    pub fn new(mode: ConnectionMode) -> Self {
+    /// A connection to the server whose Pub/Sub channels `channel_registry`
+    /// keeps count of.
+    pub fn new(mode: ConnectionMode, channel_registry: Arc<ChannelRegistry>) -> Self {
         ConnectionState {
             mode,
             transaction: Arc::new(TransactionSlot::new()),
             replica: Arc::new(ReplicaSlot::new()),
-            subscriptions: Arc::new(Subscriptions::new()),
+            subscriptions: Arc::new(Subscriptions::new(channel_registry)),
         }
     }
 
@@ -109,7 +111,10 @@ pub fn handle_connection(
     debug!("accepted new connection");
 
     // Owned here, so it lives exactly as long as the connection does.
-    let connection_state = Arc::new(ConnectionState::new(role));
+    let connection_state = Arc::new(ConnectionState::new(
+        role,
+        Arc::clone(&server_state.channel_registry),
+    ));
 
     loop {
         let received_messages: Vec<(DataType, usize)> = io::read_messages_with_lengths(stream)?;

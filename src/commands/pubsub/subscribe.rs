@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn should_confirm_the_channel_it_subscribed_to() -> anyhow::Result<()> {
-        let subscriptions = Arc::new(Subscriptions::new());
+        let subscriptions = Arc::new(Subscriptions::default());
 
         assert_eq!(
             confirmations(&["SUBSCRIBE", "foo"], &subscriptions)?,
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn should_count_up_as_the_connection_subscribes_to_more_channels() -> anyhow::Result<()> {
-        let subscriptions = Arc::new(Subscriptions::new());
+        let subscriptions = Arc::new(Subscriptions::default());
 
         assert_eq!(
             confirmations(&["SUBSCRIBE", "foo"], &subscriptions)?,
@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn should_confirm_a_channel_it_is_already_subscribed_to_at_the_same_count(
     ) -> anyhow::Result<()> {
-        let subscriptions = Arc::new(Subscriptions::new());
+        let subscriptions = Arc::new(Subscriptions::default());
         confirmations(&["SUBSCRIBE", "foo"], &subscriptions)?;
 
         assert_eq!(
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn should_confirm_every_channel_named_in_one_call() -> anyhow::Result<()> {
-        let subscriptions = Arc::new(Subscriptions::new());
+        let subscriptions = Arc::new(Subscriptions::default());
 
         assert_eq!(
             confirmations(&["SUBSCRIBE", "foo", "bar"], &subscriptions)?,
@@ -169,8 +169,8 @@ mod tests {
 
     #[test]
     fn should_leave_another_connections_subscriptions_alone() -> anyhow::Result<()> {
-        let one = Arc::new(Subscriptions::new());
-        let other = Arc::new(Subscriptions::new());
+        let one = Arc::new(Subscriptions::default());
+        let other = Arc::new(Subscriptions::default());
         confirmations(&["SUBSCRIBE", "foo"], &one)?;
 
         assert_eq!(
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn should_reject_a_call_that_names_no_channel() {
-        let subscriptions = Arc::new(Subscriptions::new());
+        let subscriptions = Arc::new(Subscriptions::default());
 
         let error = subscribe(&["SUBSCRIBE"], &subscriptions)
             .execute(&create_test_storage())
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn should_not_propagate_a_subscription_to_the_replicas() {
-        let subscriptions = Arc::new(Subscriptions::new());
+        let subscriptions = Arc::new(Subscriptions::default());
         let command = subscribe(&["SUBSCRIBE", "foo"], &subscriptions);
 
         assert!(!command.is_propagated_to_replicas());

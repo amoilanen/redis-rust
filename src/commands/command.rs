@@ -8,7 +8,7 @@ use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 use super::RedisCommand;
-use crate::commands::{self, Config, Echo, Ping, Set, Get, Incr, Keys, Multi, Exec, Discard, Info, ReplConf, PSync, Wait, RPush, LPush, LRange, LLen, LPop, BLPop, Subscribe, Type, XAdd, XRange, XRead};
+use crate::commands::{self, Config, Echo, Ping, Set, Get, Incr, Keys, Multi, Exec, Discard, Info, ReplConf, PSync, Wait, RPush, LPush, LRange, LLen, LPop, BLPop, Publish, Subscribe, Type, XAdd, XRange, XRead};
 use crate::connection::ConnectionState;
 use crate::server_state::ServerState;
 
@@ -87,6 +87,7 @@ fn build_command(
         "LPOP"      => Box::new(LPop { message }),
         "BLPOP"     => Box::new(BLPop { message, notifier: notifier() }),
         "SUBSCRIBE" => Box::new(Subscribe { message, subscriptions: subscriptions() }),
+        "PUBLISH"   => Box::new(Publish { message, channel_registry: Arc::clone(&server_state.channel_registry) }),
         "TYPE"      => Box::new(Type { message }),
         "XADD"      => Box::new(XAdd { message, notifier: notifier() }),
         "XRANGE"    => Box::new(XRange { message }),

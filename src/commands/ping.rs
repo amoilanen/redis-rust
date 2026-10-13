@@ -51,7 +51,7 @@ mod tests {
 
     fn ping(channels_with_subscription: &[&str]) -> Result<Ping, anyhow::Error> {
         let message = command_message(&["PING"]);
-        let subscriptions = Subscriptions::new();
+        let subscriptions = Subscriptions::default();
         for channel in channels_with_subscription.iter() {
             subscriptions.subscribe(channel)?;
         }

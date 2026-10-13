@@ -35,3 +35,7 @@ path = "e2e/stream_commands.rs"
 [[test]]
 name = "e2e_replication"
 path = "e2e/replication.rs"
+
+[[test]]
+name = "e2e_pubsub_commands"
+path = "e2e/pubsub_commands.rs"

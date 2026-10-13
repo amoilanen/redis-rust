@@ -102,7 +102,10 @@ mod tests {
     fn exec(parts: &[&str], transaction: &Arc<TransactionSlot>, server_state: &Arc<ServerState>) -> Exec {
         let connection = ConnectionState {
             transaction: Arc::clone(transaction),
-            ..ConnectionState::new(ConnectionMode::ConnectedClient)
+            ..ConnectionState::new(
+                ConnectionMode::ConnectedClient,
+                Arc::clone(&server_state.channel_registry),
+            )
         };
         Exec {
             message: command_message(parts),
