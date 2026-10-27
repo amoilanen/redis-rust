@@ -95,7 +95,7 @@ mod tests {
     use crate::config::ServerOptions;
     use crate::commands::transaction::TransactionSlot;
     use crate::commands::{client_error_message, command_message};
-    use crate::connection::ConnectionMode;
+    use crate::connection::{ClientWriter, ConnectionMode};
 
     /// An EXEC on a client connection whose transaction slot is `transaction`
     /// - the slot being what every test here sets up and asserts on.
@@ -104,8 +104,10 @@ mod tests {
             transaction: Arc::clone(transaction),
             ..ConnectionState::new(
                 ConnectionMode::ConnectedClient,
-                Arc::clone(&server_state.channel_registry),
+                Arc::new(ClientWriter::discarding()),
+                server_state,
             )
+            .unwrap()
         };
         Exec {
             message: command_message(parts),

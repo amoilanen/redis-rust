@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use log::*;
 
-use super::Subscriptions;
+use super::ChannelSubscriptions;
 use crate::commands::RedisCommand;
 use crate::error::RedisError;
 use crate::protocol;
@@ -27,8 +27,8 @@ use crate::storage::Storage;
 /// SUBSCRIBE command implementation.
 pub struct Subscribe {
     pub message: DataType,
-    /// Subscriptions of the connection this SUBSCRIBE arrived on.
-    pub subscriptions: Arc<Subscriptions>,
+    /// Channel subscriptions of the connection this SUBSCRIBE arrived on.
+    pub channel_subscriptions: Arc<ChannelSubscriptions>,
 }
 
 impl RedisCommand for Subscribe {
@@ -45,7 +45,7 @@ impl RedisCommand for Subscribe {
 
         let mut confirmations: Vec<DataType> = Vec::with_capacity(channels.len());
         for channel in channels {
-            let subscribed_count = self.subscriptions.subscribe(channel)?;
+            let subscribed_count = self.channel_subscriptions.subscribe(channel)?;
 
             debug!(
                 "SUBSCRIBE {}: the connection is now subscribed to {} channel(s)",
@@ -84,11 +84,12 @@ mod tests {
     use super::*;
     use crate::commands::{client_error_message, command_message, create_test_storage};
 
-    /// A SUBSCRIBE on a connection whose subscriptions are `subscriptions`.
-    fn subscribe(parts: &[&str], subscriptions: &Arc<Subscriptions>) -> Subscribe {
+    /// A SUBSCRIBE on a connection whose channel subscriptions are
+    /// `channel_subscriptions`.
+    fn subscribe(parts: &[&str], channel_subscriptions: &Arc<ChannelSubscriptions>) -> Subscribe {
         Subscribe {
             message: command_message(parts),
-            subscriptions: Arc::clone(subscriptions),
+            channel_subscriptions: Arc::clone(channel_subscriptions),
         }
     }
 
@@ -97,9 +98,9 @@ mod tests {
     /// a count sent as text, fails the assertion.
     fn confirmations(
         parts: &[&str],
-        subscriptions: &Arc<Subscriptions>,
+        channel_subscriptions: &Arc<ChannelSubscriptions>,
     ) -> anyhow::Result<Vec<DataType>> {
-        subscribe(parts, subscriptions).execute(&create_test_storage())
+        subscribe(parts, channel_subscriptions).execute(&create_test_storage())
     }
 
     /// The confirmation of a subscription to `channel`, leaving the connection
@@ -116,7 +117,7 @@ mod tests {
 
     #[test]
     fn should_confirm_the_channel_it_subscribed_to() -> anyhow::Result<()> {
-        let subscriptions = Arc::new(Subscriptions::default());
+        let subscriptions = Arc::new(ChannelSubscriptions::default());
 
         assert_eq!(
             confirmations(&["SUBSCRIBE", "foo"], &subscriptions)?,
@@ -127,7 +128,7 @@ mod tests {
 
     #[test]
     fn should_count_up_as_the_connection_subscribes_to_more_channels() -> anyhow::Result<()> {
-        let subscriptions = Arc::new(Subscriptions::default());
+        let subscriptions = Arc::new(ChannelSubscriptions::default());
 
         assert_eq!(
             confirmations(&["SUBSCRIBE", "foo"], &subscriptions)?,
@@ -143,7 +144,7 @@ mod tests {
     #[test]
     fn should_confirm_a_channel_it_is_already_subscribed_to_at_the_same_count(
     ) -> anyhow::Result<()> {
-        let subscriptions = Arc::new(Subscriptions::default());
+        let subscriptions = Arc::new(ChannelSubscriptions::default());
         confirmations(&["SUBSCRIBE", "foo"], &subscriptions)?;
 
         assert_eq!(
@@ -155,7 +156,7 @@ mod tests {
 
     #[test]
     fn should_confirm_every_channel_named_in_one_call() -> anyhow::Result<()> {
-        let subscriptions = Arc::new(Subscriptions::default());
+        let subscriptions = Arc::new(ChannelSubscriptions::default());
 
         assert_eq!(
             confirmations(&["SUBSCRIBE", "foo", "bar"], &subscriptions)?,
@@ -169,8 +170,8 @@ mod tests {
 
     #[test]
     fn should_leave_another_connections_subscriptions_alone() -> anyhow::Result<()> {
-        let one = Arc::new(Subscriptions::default());
-        let other = Arc::new(Subscriptions::default());
+        let one = Arc::new(ChannelSubscriptions::default());
+        let other = Arc::new(ChannelSubscriptions::default());
         confirmations(&["SUBSCRIBE", "foo"], &one)?;
 
         assert_eq!(
@@ -182,7 +183,7 @@ mod tests {
 
     #[test]
     fn should_reject_a_call_that_names_no_channel() {
-        let subscriptions = Arc::new(Subscriptions::default());
+        let subscriptions = Arc::new(ChannelSubscriptions::default());
 
         let error = subscribe(&["SUBSCRIBE"], &subscriptions)
             .execute(&create_test_storage())
@@ -196,7 +197,7 @@ mod tests {
 
     #[test]
     fn should_not_propagate_a_subscription_to_the_replicas() {
-        let subscriptions = Arc::new(Subscriptions::default());
+        let subscriptions = Arc::new(ChannelSubscriptions::default());
         let command = subscribe(&["SUBSCRIBE", "foo"], &subscriptions);
 
         assert!(!command.is_propagated_to_replicas());

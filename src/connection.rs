@@ -7,12 +7,13 @@ use anyhow::anyhow;
 use log::*;
 use std::io::Write;
 use std::net::TcpStream;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::protocol::{self, DataType};
 use crate::error::RedisError;
 use crate::io;
-use crate::commands::{command, pubsub::{self, ChannelRegistry, Subscriptions}, transaction::TransactionSlot};
+use crate::commands::{command, pubsub::{self, ChannelSubscriptions}, transaction::TransactionSlot};
+use crate::connection_registry::ClientConnectionRegistration;
 use crate::storage::Storage;
 use crate::server_state::{ReplicaSlot, ServerState};
 
@@ -40,14 +41,59 @@ impl ConnectionMode {
     }
 }
 
+/// The write half of a connection: everything sent to the peer goes through
+/// here.
+///
+/// Shared, because two parties write to a client: its own connection, with
+/// the replies to its commands, and whichever connection PUBLISHes to a
+/// channel the client is subscribed to. The lock is held for a whole batch of
+/// messages, so a published message never lands in the middle of a reply - or
+/// of another message.
+pub struct ClientWriter {
+    stream: Mutex<Box<dyn Write + Send>>,
+}
+
+impl ClientWriter {
+    pub fn new(stream: impl Write + Send + 'static) -> Self {
+        ClientWriter { stream: Mutex::new(Box::new(stream)) }
+    }
+
+    /// A writer that throws away everything sent to it, for a connection whose
+    /// output nobody reads.
+    pub fn discarding() -> Self {
+        Self::new(std::io::sink())
+    }
+
+    /// Sends `messages` to the peer, back to back and in order.
+    pub fn send(&self, messages: &[DataType]) -> Result<(), anyhow::Error> {
+        let mut bytes: Vec<u8> = Vec::new();
+        for message in messages {
+            trace!("Sending: {:?}", message);
+            bytes.extend_from_slice(&message.serialize());
+        }
+        trace!("which serializes to {:?}", bytes);
+        let mut stream = self.lock()?;
+        stream.write_all(&bytes)?;
+        stream.flush()?;
+        Ok(())
+    }
+
+    fn lock(&self) -> Result<MutexGuard<'_, Box<dyn Write + Send>>, anyhow::Error> {
+        self.stream
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock a client connection: {}", e))
+    }
+}
+
 /// Everything one connection owns for as long as it lasts.
 ///
 /// Created when the connection is accepted and dropped when it ends, which is
-/// the whole lifecycle: a disconnect discards the open transaction, and
-/// dropping the subscriptions counts the client out of the server's channel
-/// registry, with nothing to unregister by hand. The one other thing other
-/// connections must reach - a replica's socket - is registered separately on
-/// `ServerState`, and pruned there when a write to it fails.
+/// the whole lifecycle: a disconnect discards the open transaction, dropping
+/// the registration takes the connection off the server's connection
+/// registry, and dropping the channel subscriptions takes it off every
+/// channel - with nothing to unregister by hand. A replica's socket is
+/// registered separately on `ServerState`, and pruned there when a write to
+/// it fails.
 ///
 /// Each field keeps an `Arc` of its own rather than the state being shared
 /// whole: `build_command` hands a command only the slot it works on, so a
@@ -56,25 +102,44 @@ pub struct ConnectionState {
     /// Who is on the other end, which decides whether replies are sent and
     /// whether the peer's commands count towards the replication offset.
     pub mode: ConnectionMode,
+    /// Where replies to this connection's commands are written. The same
+    /// writer is listed in the server's connection registry, which is how
+    /// other connections - PUBLISH - reach this one.
+    pub writer: Arc<ClientWriter>,
+    /// This connection's entry in the server's connection registry.
+    pub client_connection_registration: ClientConnectionRegistration,
     /// The at-most-one transaction opened by MULTI.
     pub transaction: Arc<TransactionSlot>,
     /// Empty until this connection turns out to be a replica's, which a PSYNC
     /// sent by the replica decides.
     pub replica: Arc<ReplicaSlot>,
     /// The channels SUBSCRIBE has taken on this connection.
-    pub subscriptions: Arc<Subscriptions>,
+    pub channel_subscriptions: Arc<ChannelSubscriptions>,
 }
 
 impl ConnectionState {
-    /// A connection to the server whose Pub/Sub channels `channel_registry`
-    /// keeps count of.
-    pub fn new(mode: ConnectionMode, channel_registry: Arc<ChannelRegistry>) -> Self {
-        ConnectionState {
+    /// A connection to `server_state`, writing to its peer through `writer`.
+    /// It is listed in the server's connection registry from here until the
+    /// state is dropped.
+    pub fn new(
+        mode: ConnectionMode,
+        writer: Arc<ClientWriter>,
+        server_state: &ServerState,
+    ) -> Result<Self, anyhow::Error> {
+        let client_connection_registration =
+            server_state.connection_registry.register(Arc::clone(&writer))?;
+        let channel_subscriptions = Arc::new(ChannelSubscriptions::new(
+            client_connection_registration.connection_id(),
+            Arc::clone(&server_state.channel_registry),
+        ));
+        Ok(ConnectionState {
             mode,
+            writer,
+            client_connection_registration,
             transaction: Arc::new(TransactionSlot::new()),
             replica: Arc::new(ReplicaSlot::new()),
-            subscriptions: Arc::new(Subscriptions::new(channel_registry)),
-        }
+            channel_subscriptions,
+        })
     }
 
     fn should_reply(&self) -> bool {
@@ -113,8 +178,9 @@ pub fn handle_connection(
     // Owned here, so it lives exactly as long as the connection does.
     let connection_state = Arc::new(ConnectionState::new(
         role,
-        Arc::clone(&server_state.channel_registry),
-    ));
+        Arc::new(ClientWriter::new(stream.try_clone()?)),
+        server_state,
+    )?);
 
     loop {
         let received_messages: Vec<(DataType, usize)> = io::read_messages_with_lengths(stream)?;
@@ -148,7 +214,7 @@ pub fn handle_connection(
 }
 
 fn handle_command(
-    stream: &mut TcpStream,
+    stream: &TcpStream,
     received_message: &DataType,
     server_state: &Arc<ServerState>,
     connection_state: &Arc<ConnectionState>,
@@ -163,11 +229,11 @@ fn handle_command(
     // Subscribed mode limits a connection to managing its subscriptions. The
     // check comes before queueing, as in Redis, so a transaction cannot be
     // used to slip a forbidden command past it.
-    if connection_state.subscriptions.is_subscribed_mode()? {
+    if connection_state.channel_subscriptions.is_subscribed_mode()? {
         if let Err(redis_error) = pubsub::ensure_allowed_in_subscribed_mode(command_name) {
             debug!("Rejected {} in subscribed mode", command_name);
             if connection_state.should_reply() {
-                send_reply(stream, vec![redis_error.as_protocol_error()])?;
+                connection_state.writer.send(&[redis_error.as_protocol_error()])?;
             }
             return Ok(());
         }
@@ -181,7 +247,7 @@ fn handle_command(
     if connection_state.transaction.queue(&command_name, received_message)? {
         debug!("Queued {} in the open transaction", command_name);
         if connection_state.should_reply() {
-            send_reply(stream, vec![protocol::simple_string("QUEUED")])?;
+            connection_state.writer.send(&[protocol::simple_string("QUEUED")])?;
         }
         return Ok(());
     }
@@ -198,7 +264,7 @@ fn handle_command(
         Err(error) => match error.downcast::<RedisError>() {
             Ok(redis_error) => {
                 if connection_state.should_reply() || command.should_always_reply() {
-                    send_reply(stream, vec![protocol::simple_error(&redis_error.message)])?;
+                    connection_state.writer.send(&[protocol::simple_error(&redis_error.message)])?;
                 }
                 return Ok(());
             }
@@ -207,23 +273,13 @@ fn handle_command(
     };
 
     if connection_state.should_reply() || command.should_always_reply() {
-        send_reply(stream, reply)?;
+        connection_state.writer.send(&reply)?;
     }
 
     if server_state.is_master() && command.is_propagated_to_replicas() {
         server_state.propagate_to_replicas(&*command)?;
     }
 
-    Ok(())
-}
-
-fn send_reply(stream: &mut TcpStream, reply: Vec<DataType>) -> Result<(), anyhow::Error> {
-    for message in reply.into_iter() {
-        trace!("Sending: {:?}", message);
-        let message_bytes = message.serialize();
-        trace!("which serializes to {:?}", message_bytes);
-        stream.write_all(&message_bytes)?;
-    }
     Ok(())
 }
 

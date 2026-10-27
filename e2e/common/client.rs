@@ -168,6 +168,35 @@ impl RespClient {
         resp_to_plain(self.read_resp()?)
     }
 
+    /// Read a single RESP value as is - a message pushed to a subscribed
+    /// client, say, which arrives without a command of its own to answer.
+    pub fn read_response_resp(&mut self) -> anyhow::Result<RespValue> {
+        self.read_resp()
+    }
+
+    /// Whether anything arrives from the server within `wait`, without
+    /// consuming it - for a test asserting that a client is sent nothing.
+    pub fn has_pending_response(&mut self, wait: Duration) -> anyhow::Result<bool> {
+        if !self.reader.buffer().is_empty() {
+            return Ok(true);
+        }
+        self.reader.get_ref().set_read_timeout(Some(wait))?;
+        let pending = match self.reader.fill_buf() {
+            Ok(bytes) => !bytes.is_empty(),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                false
+            }
+            Err(error) => return Err(error.into()),
+        };
+        self.reader.get_ref().set_read_timeout(Some(Self::TIMEOUT))?;
+        Ok(pending)
+    }
+
     /// Read a single RESP response and render it as a JSON-encoded string,
     /// preserving nested array structure.
     pub fn read_response_json(&mut self) -> anyhow::Result<String> {

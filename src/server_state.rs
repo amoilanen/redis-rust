@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use rand::Rng;
 use crate::commands::RedisCommand;
 use crate::commands::pubsub::ChannelRegistry;
+use crate::connection_registry::ConnectionRegistry;
 use crate::blocking::BlockingNotifier;
 use crate::config::ServerOptions;
 use crate::error::RedisError;
@@ -110,9 +111,12 @@ pub struct ServerState {
     /// the lock is never held across anything but a write or a quick scan.
     replica_links: Mutex<Vec<Arc<ReplicaLink>>>,
     pub blocking_notifier: Arc<BlockingNotifier>,
-    /// How many connections are subscribed to each Pub/Sub channel - shared
-    /// with every connection's subscriptions, which keep it up to date.
+    /// Who is subscribed to which Pub/Sub channel - shared with every
+    /// connection's channel subscriptions, which keep it up to date.
     pub channel_registry: Arc<ChannelRegistry>,
+    /// Every open client connection and how to reach it - shared with every
+    /// connection's registration, which lists it here for as long as it lasts.
+    pub connection_registry: Arc<ConnectionRegistry>,
     /// The keyspace this server serves. Private so it is reached through
     /// [`ServerState::storage`], which hands out the bare keyspace:
     /// commands take that alone, never the whole server state.
@@ -434,6 +438,7 @@ impl ServerState {
             replica_links: Mutex::new(Vec::new()),
             blocking_notifier: Arc::new(BlockingNotifier::new()),
             channel_registry: Arc::new(ChannelRegistry::new()),
+            connection_registry: Arc::new(ConnectionRegistry::new()),
             storage: Mutex::new(Storage::new(HashMap::new())),
             replication_offset: AtomicUsize::new(0),
             stream_offset: AtomicUsize::new(0),
@@ -510,7 +515,7 @@ impl ServerState {
 
 #[cfg(test)]
 mod tests {
-    use crate::commands::pubsub::Subscriptions;
+    use crate::commands::pubsub::ChannelSubscriptions;
 
 use super::*;
     use std::net::TcpListener;
@@ -524,7 +529,7 @@ use super::*;
     fn ping() -> crate::commands::Ping {
         crate::commands::Ping {
             message: crate::protocol::array(vec![crate::protocol::bulk_string("PING")]),
-            subscriptions: Arc::new(Subscriptions::default())
+            channel_subscriptions: Arc::new(ChannelSubscriptions::default())
         }
     }
 

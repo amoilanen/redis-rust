@@ -3,6 +3,7 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod connection;
+pub mod connection_registry;
 pub mod error;
 pub mod glob;
 pub mod io;

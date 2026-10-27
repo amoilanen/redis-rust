@@ -63,12 +63,12 @@ fn build_command(
     // the queued commands, so it needs whatever any of them might want.
     let transaction = || Arc::clone(&connection.transaction);
     let replica = || Arc::clone(&connection.replica);
-    let subscriptions = || Arc::clone(&connection.subscriptions);
+    let channel_subscriptions = || Arc::clone(&connection.channel_subscriptions);
     let whole_connection = || Arc::clone(connection);
 
     let command: Box<dyn RedisCommand> = match command_name {
         "ECHO"      => Box::new(Echo { message }),
-        "PING"      => Box::new(Ping { message, subscriptions: subscriptions() }),
+        "PING"      => Box::new(Ping { message, channel_subscriptions: channel_subscriptions() }),
         "SET"       => Box::new(Set { message }),
         "GET"       => Box::new(Get { message }),
         "INCR"      => Box::new(Incr { message }),
@@ -86,8 +86,12 @@ fn build_command(
         "LLEN"      => Box::new(LLen { message }),
         "LPOP"      => Box::new(LPop { message }),
         "BLPOP"     => Box::new(BLPop { message, notifier: notifier() }),
-        "SUBSCRIBE" => Box::new(Subscribe { message, subscriptions: subscriptions() }),
-        "PUBLISH"   => Box::new(Publish { message, channel_registry: Arc::clone(&server_state.channel_registry) }),
+        "SUBSCRIBE" => Box::new(Subscribe { message, channel_subscriptions: channel_subscriptions() }),
+        "PUBLISH"   => Box::new(Publish {
+            message,
+            channel_registry: Arc::clone(&server_state.channel_registry),
+            connection_registry: Arc::clone(&server_state.connection_registry),
+        }),
         "TYPE"      => Box::new(Type { message }),
         "XADD"      => Box::new(XAdd { message, notifier: notifier() }),
         "XRANGE"    => Box::new(XRange { message }),

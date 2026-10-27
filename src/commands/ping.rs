@@ -8,18 +8,18 @@ use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 use super::RedisCommand;
-use super::pubsub::Subscriptions;
+use super::pubsub::ChannelSubscriptions;
 
 /// PING command implementation.
 pub struct Ping {
     pub message: DataType,
-    /// Subscriptions of the connection this SUBSCRIBE arrived on.
-    pub subscriptions: Arc<Subscriptions>,
+    /// Channel subscriptions of the connection this PING arrived on.
+    pub channel_subscriptions: Arc<ChannelSubscriptions>,
 }
 
 impl RedisCommand for Ping {
     fn execute(&self, _: &Mutex<Storage>) -> Result<Vec<DataType>, anyhow::Error> {
-        let resp = if self.subscriptions.is_subscribed_mode()? {
+        let resp = if self.channel_subscriptions.is_subscribed_mode()? {
             vec![protocol::array(vec![protocol::bulk_string("pong"), protocol::bulk_string("")])]
         } else {
             vec![protocol::simple_string("PONG")]
@@ -51,11 +51,11 @@ mod tests {
 
     fn ping(channels_with_subscription: &[&str]) -> Result<Ping, anyhow::Error> {
         let message = command_message(&["PING"]);
-        let subscriptions = Subscriptions::default();
+        let channel_subscriptions = ChannelSubscriptions::default();
         for channel in channels_with_subscription.iter() {
-            subscriptions.subscribe(channel)?;
+            channel_subscriptions.subscribe(channel)?;
         }
-        Ok(Ping { message, subscriptions: Arc::new(subscriptions) })
+        Ok(Ping { message, channel_subscriptions: Arc::new(channel_subscriptions) })
     }
 
     #[test]
