@@ -15,19 +15,22 @@
 //! where only the commands that manage subscriptions - plus PING, QUIT and
 //! RESET - may run; [`ensure_allowed_in_subscribed_mode`] rejects the rest.
 
-use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{anyhow, Result};
 
 use crate::connection_registry::ConnectionId;
 use crate::error::RedisError;
+use membership::Membership;
 
+mod membership;
 pub mod publish;
 pub mod subscribe;
+pub mod unsubscribe;
 
 pub use publish::Publish;
 pub use subscribe::Subscribe;
+pub use unsubscribe::Unsubscribe;
 
 /// The commands a connection in subscribed mode may still run, by the
 /// upper-case names `RedisCommand::name` reports.
@@ -58,21 +61,14 @@ pub fn ensure_allowed_in_subscribed_mode(command_name: &str) -> Result<(), Redis
 
 /// Who is subscribed to which channel, server-wide - the one record of it.
 ///
-/// Kept in both directions, under one lock so the two never disagree: by
-/// channel, for PUBLISH to find a channel's subscribers; and by connection,
-/// for SUBSCRIBE to count a connection's channels and for a connection that
-/// ends to leave exactly the channels it was on.
+/// Kept in both directions by [`Membership`], which alone can change them and
+/// keeps them in agreement; the registry holds it under one lock so no reader
+/// sees one direction updated without the other.
 ///
 /// Only ever changed through [`ChannelSubscriptions`], which subscribes its
 /// own connection and takes it off every channel once the connection ends.
 pub struct ChannelRegistry {
     membership: Mutex<Membership>,
-}
-
-#[derive(Default)]
-struct Membership {
-    by_channel: HashMap<String, HashSet<ConnectionId>>,
-    by_connection: HashMap<ConnectionId, HashSet<String>>,
 }
 
 impl ChannelRegistry {
@@ -82,53 +78,42 @@ impl ChannelRegistry {
 
     /// The connections subscribed to `channel`, each once.
     pub fn subscribers(&self, channel: &str) -> Result<Vec<ConnectionId>> {
-        Ok(self
-            .lock()?
-            .by_channel
-            .get(channel)
-            .map(|subscribers| subscribers.iter().copied().collect())
-            .unwrap_or_default())
+        Ok(self.lock()?.subscribers(channel))
     }
 
     /// Subscribes `connection_id` to `channel`, answering with the number of
     /// channels it is subscribed to afterwards. A channel it is already on is
     /// not counted twice.
     fn subscribe(&self, connection_id: ConnectionId, channel: &str) -> Result<usize> {
-        let mut membership = self.lock()?;
-        membership
-            .by_channel
-            .entry(channel.to_owned())
-            .or_default()
-            .insert(connection_id);
-        let channels = membership.by_connection.entry(connection_id).or_default();
-        channels.insert(channel.to_owned());
-        Ok(channels.len())
+        Ok(self.lock()?.subscribe(connection_id, channel))
     }
 
     /// How many channels `connection_id` is subscribed to.
     fn channel_count(&self, connection_id: ConnectionId) -> Result<usize> {
-        Ok(self.lock()?.by_connection.get(&connection_id).map_or(0, HashSet::len))
+        Ok(self.lock()?.channel_count(connection_id))
     }
 
-    /// Takes `connection_id` off every channel it is on, forgetting a channel
-    /// once nobody is left on it so the map does not grow with every channel
-    /// ever named.
+    /// Unsubscribes `connection_id` from `channel`, answering with the number
+    /// of channels it is still subscribed to. A channel it is not on changes
+    /// nothing, so the count stays where it was.
+    fn unsubscribe(&self, connection_id: ConnectionId, channel: &str) -> Result<usize> {
+        Ok(self.lock()?.unsubscribe(connection_id, channel))
+    }
+
+    /// The channels `connection_id` is subscribed to, in name order.
+    fn channels(&self, connection_id: ConnectionId) -> Result<Vec<String>> {
+        Ok(self.lock()?.channels(connection_id))
+    }
+
+    /// Takes `connection_id` off every channel it is on.
     ///
     /// Run as a connection ends, so a poisoned lock is no reason to skip it:
     /// the entries it still holds are exactly what has to be undone.
     fn leave(&self, connection_id: ConnectionId) {
-        let mut membership = self.membership.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(channels) = membership.by_connection.remove(&connection_id) else {
-            return;
-        };
-        for channel in channels {
-            if let Some(subscribers) = membership.by_channel.get_mut(&channel) {
-                subscribers.remove(&connection_id);
-                if subscribers.is_empty() {
-                    membership.by_channel.remove(&channel);
-                }
-            }
-        }
+        self.membership
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .leave(connection_id);
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Membership>> {
@@ -174,6 +159,19 @@ impl ChannelSubscriptions {
     /// receives each message once.
     pub fn subscribe(&self, channel: &str) -> Result<usize> {
         self.channel_registry.subscribe(self.connection_id, channel)
+    }
+
+    /// Unsubscribes this connection from `channel`, answering with the number
+    /// of channels it is still subscribed to - the count UNSUBSCRIBE reports.
+    /// A channel it was not subscribed to leaves the count where it was.
+    pub fn unsubscribe(&self, channel: &str) -> Result<usize> {
+        self.channel_registry.unsubscribe(self.connection_id, channel)
+    }
+
+    /// The channels this connection is subscribed to, in name order - what a
+    /// bare UNSUBSCRIBE unsubscribes it from.
+    pub fn channels(&self) -> Result<Vec<String>> {
+        self.channel_registry.channels(self.connection_id)
     }
 
     /// How many channels this connection is subscribed to.
@@ -283,6 +281,31 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_unsubscribing_lowers_the_count_and_leaves_subscribed_mode_at_zero() -> Result<()> {
+        let subscriptions = ChannelSubscriptions::default();
+        subscriptions.subscribe("foo")?;
+        subscriptions.subscribe("bar")?;
+
+        assert_eq!(subscriptions.unsubscribe("foo")?, 1);
+        assert!(subscriptions.is_subscribed_mode()?);
+        assert_eq!(subscriptions.unsubscribe("bar")?, 0);
+        assert!(!subscriptions.is_subscribed_mode()?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_unsubscribing_from_a_channel_not_subscribed_to_leaves_the_count_alone() -> Result<()> {
+        let subscriptions = ChannelSubscriptions::default();
+        assert_eq!(subscriptions.unsubscribe("foo")?, 0);
+
+        subscriptions.subscribe("foo")?;
+
+        assert_eq!(subscriptions.unsubscribe("bar")?, 1);
+        assert_eq!(subscriptions.channels()?, vec!["foo".to_owned()]);
+        Ok(())
+    }
+
     /// Connection `n` on the server of `registry`.
     fn connection(n: u64, registry: &Arc<ChannelRegistry>) -> ChannelSubscriptions {
         ChannelSubscriptions::new(ConnectionId::new(n), Arc::clone(registry))
@@ -320,6 +343,26 @@ mod tests {
         leaving.subscribe("bar")?;
 
         drop(leaving);
+
+        assert_eq!(registry.subscribers("foo")?, vec![ConnectionId::new(1)]);
+        assert_eq!(registry.subscribers("bar")?, vec![]);
+        assert_eq!(staying.count()?, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_an_unsubscribed_connection_is_no_longer_a_subscriber_of_the_channel() -> Result<()> {
+        let registry = Arc::new(ChannelRegistry::new());
+        let staying = connection(1, &registry);
+        let leaving = connection(2, &registry);
+        staying.subscribe("foo")?;
+        leaving.subscribe("foo")?;
+        leaving.subscribe("bar")?;
+
+        assert_eq!(leaving.unsubscribe("foo")?, 1);
+        assert_eq!(leaving.unsubscribe("bar")?, 0);
+        // Another connection's channel is not this one's to leave.
+        assert_eq!(leaving.unsubscribe("foo")?, 0);
 
         assert_eq!(registry.subscribers("foo")?, vec![ConnectionId::new(1)]);
         assert_eq!(registry.subscribers("bar")?, vec![]);

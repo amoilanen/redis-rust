@@ -41,7 +41,7 @@ pub use replconf::ReplConf;
 pub use psync::PSync;
 pub use wait::Wait;
 pub use list::{RPush, LPush, LRange, LLen, LPop, BLPop};
-pub use pubsub::{Publish, Subscribe};
+pub use pubsub::{Publish, Subscribe, Unsubscribe};
 pub use stream::{XAdd, XRange, XRead};
 pub use transaction::{Multi, Exec, Discard};
 pub use r#type::Type;
