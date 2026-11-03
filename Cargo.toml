@@ -39,3 +39,7 @@ path = "e2e/replication.rs"
 [[test]]
 name = "e2e_pubsub_commands"
 path = "e2e/pubsub_commands.rs"
+
+[[test]]
+name = "e2e_sorted_set_commands"
+path = "e2e/sorted_set_commands.rs"

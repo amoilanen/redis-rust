@@ -8,7 +8,7 @@ use crate::protocol;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 use super::RedisCommand;
-use crate::commands::{self, Config, Echo, Ping, Set, Get, Incr, Keys, Multi, Exec, Discard, Info, ReplConf, PSync, Wait, RPush, LPush, LRange, LLen, LPop, BLPop, Publish, Subscribe, Unsubscribe, Type, XAdd, XRange, XRead};
+use crate::commands::{self, Config, Echo, Ping, Set, Get, Incr, Keys, Multi, Exec, Discard, Info, ReplConf, PSync, Wait, RPush, LPush, LRange, LLen, LPop, BLPop, Publish, Subscribe, Unsubscribe, Type, XAdd, XRange, XRead, ZAdd};
 use crate::connection::ConnectionState;
 use crate::server_state::ServerState;
 
@@ -97,6 +97,7 @@ fn build_command(
         "XADD"      => Box::new(XAdd { message, notifier: notifier() }),
         "XRANGE"    => Box::new(XRange { message }),
         "XREAD"     => Box::new(XRead { message, notifier: notifier() }),
+        "ZADD"      => Box::new(ZAdd { message }),
         "PSYNC"     => Box::new(PSync { message, server_state: state() }),
         "WAIT"      => Box::new(Wait { message, server_state: state() }),
         _ => return None,

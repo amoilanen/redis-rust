@@ -5,6 +5,7 @@
 //!   EXPIRETIME (0xFD), SELECTDB (0xFE), EOF (0xFF)
 //! - String encoding: raw, integer (int8/16/32), LZF compressed
 //! - Expiry timestamps (absolute, millisecond precision)
+//! - Sorted sets (`RDB_TYPE_ZSET_2`, as upstream Redis writes them)
 //! - Redis-compatible CRC64 checksum (Jones polynomial)
 //!
 //! Spec reference: https://rdb.fnordig.de/file_format.html
@@ -15,6 +16,7 @@ use anyhow::{anyhow, ensure, Context, Result};
 use log::*;
 use std::collections::HashMap;
 
+use crate::sorted_set::SortedSet;
 use crate::storage::{Storage, StoredValue, Value};
 use crate::stream::{Stream, StreamEntry, StreamId};
 
@@ -38,7 +40,9 @@ const RDB_TYPE_LIST: u8 = 1;
 const RDB_TYPE_SET: u8 = 2;
 const RDB_TYPE_ZSET: u8 = 3;
 const RDB_TYPE_HASH: u8 = 4;
-// 5-8 unused in modern Redis
+// Sorted set with scores as 8-byte little-endian binary doubles.
+const RDB_TYPE_ZSET_2: u8 = 5;
+// 6-8 unused in modern Redis
 const RDB_TYPE_ZIPMAP: u8 = 9;
 #[allow(dead_code)]
 const RDB_TYPE_ZIPLIST: u8 = 10;
@@ -315,6 +319,38 @@ fn read_stream<R: Read>(reader: &mut R) -> Result<Stream> {
 }
 
 // ---------------------------------------------------------------------------
+// Sorted set encoding
+// ---------------------------------------------------------------------------
+
+/// `RDB_TYPE_ZSET_2` layout, as in upstream Redis: `<member-count>` then per
+/// member `<member-string> <score>`, the score an 8-byte little-endian IEEE
+/// 754 double.
+fn write_sorted_set(buf: &mut Vec<u8>, sorted_set: &SortedSet) {
+    buf.extend(encode_length(sorted_set.len()));
+    for scored in sorted_set.iter() {
+        write_string(buf, scored.member.as_bytes());
+        buf.extend_from_slice(&scored.score.to_le_bytes());
+    }
+}
+
+fn read_sorted_set<R: Read>(reader: &mut R) -> Result<SortedSet> {
+    let member_count = decode_length(reader)?;
+    let mut sorted_set = SortedSet::new();
+    for _ in 0..member_count {
+        let member = String::from_utf8(read_string(reader)?)
+            .context("Sorted set member is not valid UTF-8")?;
+        let mut score_bytes = [0u8; 8];
+        reader.read_exact(&mut score_bytes)?;
+        let score = f64::from_le_bytes(score_bytes);
+        // Redis rejects a NaN score as corruption; it would have no place in
+        // the ordering.
+        ensure!(!score.is_nan(), "Sorted set '{}' member has a NaN score", member);
+        sorted_set.add(&member, score);
+    }
+    Ok(sorted_set)
+}
+
+// ---------------------------------------------------------------------------
 // Value skipping (for unsupported types)
 // ---------------------------------------------------------------------------
 
@@ -369,6 +405,9 @@ fn skip_value<R: Read>(reader: &mut R, value_type: u8) -> Result<()> {
         RDB_TYPE_STREAM => {
             let _ = read_stream(reader)?;
         }
+        RDB_TYPE_ZSET_2 => {
+            let _ = read_sorted_set(reader)?;
+        }
         _ => return Err(anyhow!("Unknown RDB value type: {}", value_type)),
     }
     Ok(())
@@ -400,6 +439,10 @@ fn load_rdb_key_value<R: Read>(
         RDB_TYPE_STREAM => {
             let stream = read_stream(cursor)?;
             data.insert(key_str, StoredValue::stream(stream)?);
+        }
+        RDB_TYPE_ZSET_2 => {
+            let sorted_set = read_sorted_set(cursor)?;
+            data.insert(key_str, StoredValue::sorted_set(sorted_set)?);
         }
         _ => {
             warn!(
@@ -593,6 +636,11 @@ where
                 buf.push(RDB_TYPE_STREAM);
                 write_string(&mut buf, key.as_bytes());
                 write_stream(&mut buf, stream);
+            }
+            Value::SortedSet(sorted_set) => {
+                buf.push(RDB_TYPE_ZSET_2);
+                write_string(&mut buf, key.as_bytes());
+                write_sorted_set(&mut buf, sorted_set);
             }
         }
     }
@@ -1337,6 +1385,73 @@ mod tests {
 
         let mut cursor = Cursor::new(&body);
         skip_value(&mut cursor, RDB_TYPE_STREAM)?;
+        assert_eq!(read_string(&mut cursor)?, b"sentinel");
+        Ok(())
+    }
+
+    fn sample_sorted_set() -> SortedSet {
+        let mut sorted_set = SortedSet::new();
+        sorted_set.add("Ford", 6.1);
+        sorted_set.add("Royce", 8.2);
+        sorted_set.add("floor", f64::NEG_INFINITY);
+        sorted_set.add("ceiling", f64::INFINITY);
+        sorted_set
+    }
+
+    #[test]
+    fn round_trip_sorted_set_key() -> Result<()> {
+        let mut data: HashMap<String, StoredValue> = HashMap::new();
+        data.insert("str".into(), StoredValue::from(b"value".to_vec(), None)?);
+        data.insert("zset".into(), StoredValue::sorted_set(sample_sorted_set())?);
+        let storage = Storage::new(data);
+
+        let mut buffer = Vec::new();
+        to_rdb(&storage, &mut Cursor::new(&mut buffer))?;
+        let loaded = from_rdb(Cursor::new(&buffer))?;
+
+        assert_eq!(loaded.data.len(), 2);
+        assert_eq!(loaded.get_sorted_set("zset"), Some(&sample_sorted_set()));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_handcrafted_sorted_set() -> Result<()> {
+        let mut body = Vec::new();
+        body.push(RDB_OPCODE_SELECTDB);
+        body.extend(encode_length(0));
+
+        body.push(RDB_TYPE_ZSET_2);
+        write_string(&mut body, b"racers");
+        body.extend(encode_length(1));
+        write_string(&mut body, b"Sam");
+        body.extend_from_slice(&8.0f64.to_le_bytes());
+
+        let rdb = build_rdb(&body);
+        let loaded = from_rdb(Cursor::new(&rdb))?;
+
+        let set = loaded.get_sorted_set("racers").expect("sorted set loaded");
+        assert_eq!(set.score("Sam"), Some(8.0));
+        Ok(())
+    }
+
+    #[test]
+    fn read_sorted_set_rejects_nan_score() {
+        let mut body = Vec::new();
+        body.extend(encode_length(1));
+        write_string(&mut body, b"m");
+        body.extend_from_slice(&f64::NAN.to_le_bytes());
+
+        assert!(read_sorted_set(&mut Cursor::new(&body)).is_err());
+    }
+
+    #[test]
+    fn skip_value_handles_sorted_set() -> Result<()> {
+        let mut body = Vec::new();
+        write_sorted_set(&mut body, &sample_sorted_set());
+        write_string(&mut body, b"sentinel");
+
+        let mut cursor = Cursor::new(&body);
+        skip_value(&mut cursor, RDB_TYPE_ZSET_2)?;
         assert_eq!(read_string(&mut cursor)?, b"sentinel");
         Ok(())
     }

@@ -1,20 +1,25 @@
 use anyhow::Error;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::Cursor;
 use crate::error::RedisError;
 use crate::rdb;
+use crate::sorted_set::{ScoredMember, SortedSet};
 use crate::stream::{Stream, StreamEntry, StreamId};
 
 /// The payload held at a key. Strings and lists are stored as opaque bytes
-/// (lists as a RESP-serialized Array); streams are stored as a [`Stream`].
-/// Keeping both in one enum lets a single `data` map own the whole key-space,
+/// (lists as a RESP-serialized Array); streams are stored as a [`Stream`] and
+/// sorted sets as a [`SortedSet`]. Keeping them all in one enum lets a single `data` map own the whole key-space,
 /// so every key carries the same expiry metadata and is looked up uniformly.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Value {
     Bytes(Vec<u8>),
     Stream(Stream),
+    SortedSet(SortedSet),
 }
+
+const WRONG_TYPE: &str = "WRONGTYPE Operation against a key holding the wrong kind of value";
 
 #[derive(Debug, PartialEq)]
 pub struct StoredValue {
@@ -45,6 +50,17 @@ impl StoredValue {
         })
     }
 
+    /// Wraps a [`SortedSet`] as a stored value with no expiry.
+    pub fn sorted_set(sorted_set: SortedSet) -> Result<StoredValue, anyhow::Error> {
+        Ok(StoredValue {
+            expires_in_ms: None,
+            last_modified_timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)?
+                .as_millis(),
+            value: Value::SortedSet(sorted_set),
+        })
+    }
+
     /// Creates a StoredValue from an absolute expiry timestamp (ms since Unix epoch).
     /// Used when loading from RDB where expiry is stored as absolute time.
     pub fn with_absolute_expiry(value: Vec<u8>, expires_at_ms: Option<u64>) -> Result<StoredValue, anyhow::Error> {
@@ -62,13 +78,13 @@ impl StoredValue {
         })
     }
 
-    /// Returns the raw payload if this value is a string; `None` for a stream.
-    /// String-only by design: callers like `GET` must treat a stream as absent
-    /// rather than receive its serialized bytes.
+    /// Returns the raw payload if this value is a string; `None` for a stream
+    /// or a sorted set. String-only by design: callers like `GET` must treat
+    /// those as absent rather than receive their serialized bytes.
     pub fn string_value_as_bytes(&self) -> Option<&[u8]> {
         match &self.value {
             Value::Bytes(bytes) => Some(bytes),
-            Value::Stream(_) => None,
+            Value::Stream(_) | Value::SortedSet(_) => None,
         }
     }
 
@@ -114,12 +130,7 @@ impl Storage {
             if !stored.is_expired() {
                 return match &mut stored.value {
                     Value::Stream(stream) => Ok(stream.add(id, fields)?),
-                    Value::Bytes(_) => Err(crate::error::RedisError {
-                        message:
-                            "WRONGTYPE Operation against a key holding the wrong kind of value"
-                                .to_string(),
-                    }
-                    .into()),
+                    Value::Bytes(_) | Value::SortedSet(_) => Err(RedisError::new(WRONG_TYPE).into()),
                 };
             }
         }
@@ -137,7 +148,7 @@ impl Storage {
         match self.data.get(key) {
             Some(stored) if !stored.is_expired() => match &stored.value {
                 Value::Stream(stream) => Some(stream),
-                Value::Bytes(_) => None,
+                Value::Bytes(_) | Value::SortedSet(_) => None,
             },
             _ => None,
         }
@@ -163,6 +174,44 @@ impl Storage {
         self.get_stream(key)
             .map(|stream| stream.read(after))
             .unwrap_or_default()
+    }
+
+    /// Sets the score of each of `members` in the sorted set at `key`, creating the set if the key is absent or expired. Returns how
+    /// many members were newly added; members that already existed just get
+    /// their score updated. Errors with `WRONGTYPE`, changing nothing, if
+    /// `key` holds another type.
+    pub fn zadd(&mut self, key: &str, members: &[ScoredMember]) -> Result<usize, anyhow::Error> {
+        // One lookup yields the slot itself, so there is no second lookup
+        // that could, in principle, come back empty.
+        let stored_value = match self.data.entry(key.to_owned()) {
+            Entry::Occupied(entry) if !entry.get().is_expired() => entry.into_mut(),
+            // Expired is as good as absent: the dead value is replaced.
+            Entry::Occupied(mut entry) => {
+                entry.insert(StoredValue::sorted_set(SortedSet::new())?);
+                entry.into_mut()
+            }
+            Entry::Vacant(entry) => entry.insert(StoredValue::sorted_set(SortedSet::new())?),
+        };
+
+        let Value::SortedSet(sorted_set) = &mut stored_value.value else {
+            return Err(RedisError::new(WRONG_TYPE).into());
+        };
+
+        Ok(members
+            .iter()
+            .filter(|scored| sorted_set.add(&scored.member, scored.score))
+            .count())
+    }
+
+    /// Returns the sorted set stored at `key`, if a live one exists there.
+    pub fn get_sorted_set(&self, key: &str) -> Option<&SortedSet> {
+        match self.data.get(key) {
+            Some(stored) if !stored.is_expired() => match &stored.value {
+                Value::SortedSet(sorted_set) => Some(sorted_set),
+                Value::Bytes(_) | Value::Stream(_) => None,
+            },
+            _ => None,
+        }
     }
 
     pub fn as_rdb_bytes(&self) -> Result<Vec<u8>, Error> {
@@ -241,10 +290,7 @@ impl Storage {
             .expect("key was just observed to be live");
 
         let Value::Bytes(bytes) = &stored_value.value else {
-            return Err(RedisError::new(
-                "WRONGTYPE Operation against a key holding the wrong kind of value",
-            )
-            .into());
+            return Err(RedisError::new(WRONG_TYPE).into());
         };
 
         // Non-UTF8 bytes, text that isn't a number, and numbers too large for an
@@ -508,6 +554,28 @@ mod tests {
     fn test_xread_missing_key_is_empty() {
         let storage = Storage::new(HashMap::new());
         assert!(storage.xread("missing", StreamId::ZERO).is_empty());
+    }
+
+    #[test]
+    fn test_zadd_on_string_is_wrong_type_and_leaves_it() -> Result<(), anyhow::Error> {
+        let mut storage = Storage::new(HashMap::new());
+        storage.set("k", b"value".to_vec(), None)?;
+
+        let error = storage.zadd("k", &[ScoredMember::new(1.0, "m")]).unwrap_err();
+        assert_eq!(error.downcast::<RedisError>()?.message, WRONG_TYPE);
+        assert_eq!(storage.get("k")?, Some(b"value".to_vec()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_zadd_replaces_expired_key() -> Result<(), anyhow::Error> {
+        let mut storage = Storage::new(HashMap::new());
+        storage.set("k", b"value".to_vec(), Some(10))?;
+        thread::sleep(Duration::from_millis(30));
+
+        assert_eq!(storage.zadd("k", &[ScoredMember::new(1.0, "m")])?, 1);
+        assert!(storage.get_sorted_set("k").is_some());
+        Ok(())
     }
 
     #[test]

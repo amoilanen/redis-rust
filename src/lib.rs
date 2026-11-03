@@ -11,6 +11,7 @@ pub mod protocol;
 pub mod replication;
 pub mod rdb;
 pub mod server_state;
+pub mod sorted_set;
 pub mod storage;
 pub mod stream;
 pub mod clock;

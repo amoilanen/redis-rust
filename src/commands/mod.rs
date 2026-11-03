@@ -23,6 +23,7 @@ pub mod psync;
 pub mod wait;
 pub mod list;
 pub mod pubsub;
+pub mod sorted_set;
 pub mod stream;
 pub mod transaction;
 pub mod r#type;
@@ -42,6 +43,7 @@ pub use psync::PSync;
 pub use wait::Wait;
 pub use list::{RPush, LPush, LRange, LLen, LPop, BLPop};
 pub use pubsub::{Publish, Subscribe, Unsubscribe};
+pub use sorted_set::ZAdd;
 pub use stream::{XAdd, XRange, XRead};
 pub use transaction::{Multi, Exec, Discard};
 pub use r#type::Type;
@@ -83,18 +85,29 @@ pub fn parse_command_name(received_message: &DataType) -> Result<String, anyhow:
     Ok(command_name)
 }
 
-/// Reads a command argument as a `T`, rejecting an unreadable one with `error`.
+/// Parses `text` as a `T`, failing with the caller's `error` instead of the
+/// parser's own.
 ///
-/// The point is the error: `str::parse` fails with a `ParseIntError`, which
-/// would travel as an internal failure and drop the connection, where a client
-/// that mistyped an argument should just be told so. Which wording it deserves
-/// is the caller's to decide - Redis words a bad count differently from a bad
-/// timeout - and so is the type parsed, integer or otherwise.
-pub(crate) fn parse_argument<T: FromStr>(
-    argument: &str,
-    error: RedisError,
+/// `str::parse` fails with errors like `ParseIntError`, which would travel as
+/// an internal failure and drop the connection. A client that mistyped an
+/// argument should just be told so, in the wording the caller picks - Redis
+/// words a bad count differently from a bad timeout.
+pub(crate) fn try_parsing<T: FromStr, E: Into<anyhow::Error>>(
+    text: &str,
+    error: E,
 ) -> Result<T, anyhow::Error> {
-    argument.parse().map_err(|_| error.into())
+    text.parse().map_err(|_| error.into())
+}
+
+/// Reads a sorted set score the way Redis does: any float, including `inf`,
+/// `+inf` and `-inf`, but never NaN, which has no place in an ordering.
+pub(crate) fn parse_score(argument: &str) -> Result<f64, anyhow::Error> {
+    let not_a_float = || RedisError::new("ERR value is not a valid float");
+    let score: f64 = try_parsing(argument, not_a_float())?;
+    if score.is_nan() {
+        return Err(not_a_float().into());
+    }
+    Ok(score)
 }
 
 // ---------------------------------------------------------------------------
@@ -175,20 +188,44 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_argument_reads_any_number_type() {
+    fn test_try_parsing_reads_any_number_type() {
         let error = || RedisError::new("ERR nope");
 
-        assert_eq!(parse_argument::<i64>("-2", error()).unwrap(), -2);
-        assert_eq!(parse_argument::<usize>("60000", error()).unwrap(), 60000);
-        assert_eq!(parse_argument::<f64>("0.5", error()).unwrap(), 0.5);
+        assert_eq!(try_parsing::<i64, _>("-2", error()).unwrap(), -2);
+        assert_eq!(try_parsing::<usize, _>("60000", error()).unwrap(), 60000);
+        assert_eq!(try_parsing::<f64, _>("0.5", error()).unwrap(), 0.5);
     }
 
     #[test]
-    fn test_parse_argument_reports_the_callers_error_to_the_client() {
+    fn test_try_parsing_reports_the_callers_error_to_the_client() {
         // A client-facing RedisError, not the ParseIntError that would travel
         // as an internal failure and take the connection down with it.
-        let error = parse_argument::<i64>("soon", RedisError::new("ERR bad timeout")).unwrap_err();
+        let error = try_parsing::<i64, _>("soon", RedisError::new("ERR bad timeout")).unwrap_err();
 
         assert_eq!(client_error_message(error), "ERR bad timeout");
+    }
+
+    #[test]
+    fn test_try_parsing_accepts_any_error_convertible_to_anyhow() {
+        let error = try_parsing::<i64, _>("soon", anyhow::anyhow!("internal")).unwrap_err();
+
+        assert_eq!(error.to_string(), "internal");
+    }
+
+    #[test]
+    fn test_parse_score_accepts_floats_and_infinities() {
+        assert_eq!(parse_score("10.0").unwrap(), 10.0);
+        assert_eq!(parse_score("-1e3").unwrap(), -1000.0);
+        assert_eq!(parse_score("inf").unwrap(), f64::INFINITY);
+        assert_eq!(parse_score("+inf").unwrap(), f64::INFINITY);
+        assert_eq!(parse_score("-inf").unwrap(), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn test_parse_score_rejects_nan_and_text() {
+        for bad in ["nan", "NaN", "abc", ""] {
+            let error = parse_score(bad).unwrap_err();
+            assert_eq!(client_error_message(error), "ERR value is not a valid float");
+        }
     }
 }

@@ -38,6 +38,8 @@ impl RedisCommand for Type {
         // Lists are stored as a RESP Array; anything else is a string.
         let type_name = if storage.contains_stream(key) {
             "stream"
+        } else if storage.get_sorted_set(key).is_some() {
+            "zset"
         } else if let Some(value) = storage.get(key)? {
             match protocol::read_message_from_bytes(&value) {
                 Ok(DataType::Array { .. }) => "list",
@@ -126,6 +128,16 @@ mod tests {
 
         let result = type_cmd("stream_key").execute(&storage)?;
         assert_eq!(result[0], protocol::simple_string("stream"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_type_of_sorted_set_value() -> anyhow::Result<()> {
+        let storage = create_test_storage();
+        crate::commands::ZAdd { message: command_message(&["ZADD", "z", "1", "m"]) }
+            .execute(&storage)?;
+
+        assert_eq!(type_cmd("z").execute(&storage)?[0], protocol::simple_string("zset"));
         Ok(())
     }
 

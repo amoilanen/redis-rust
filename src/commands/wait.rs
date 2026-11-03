@@ -18,7 +18,7 @@ use crate::protocol::DataType;
 use crate::error::RedisError;
 use crate::server_state::ServerState;
 use crate::storage::Storage;
-use super::{parse_argument, RedisCommand};
+use super::{try_parsing, RedisCommand};
 
 const NO_TIMEOUT_MS: i64 = 0;
 
@@ -37,8 +37,8 @@ impl RedisCommand for Wait {
                 RedisError::new("ERR wrong number of arguments for 'wait' command").into()
             );
         }
-        let requested_replicas: i64 = parse_argument(&instructions[1], RedisError::not_an_integer())?;
-        let timeout_ms: i64 = parse_argument(&instructions[2], RedisError::not_an_integer())?;
+        let requested_replicas: i64 = try_parsing(&instructions[1], RedisError::not_an_integer())?;
+        let timeout_ms: i64 = try_parsing(&instructions[2], RedisError::not_an_integer())?;
         if timeout_ms < 0 {
             return Err(RedisError::new("ERR timeout is negative").into());
         }
