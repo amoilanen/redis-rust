@@ -87,6 +87,16 @@ impl SortedSet {
         self.scores.get(member).copied()
     }
 
+    /// `member`'s 0-based position in ascending `(score, member)` order, or
+    /// `None` if it is not in the set.
+    ///
+    /// Counts the members ordered before it, so it is O(rank): `BTreeSet`
+    /// keeps no subtree sizes to answer this in O(log n) the way Redis's
+    /// skip list does.
+    pub fn rank(&self, member: &str) -> Option<usize> {
+        self.ordered.iter().position(|other| other.member == member)
+    }
+
     pub fn len(&self) -> usize {
         self.scores.len()
     }
@@ -146,6 +156,39 @@ mod tests {
                 ScoredMember::new(14.5, "Prickett"),
             ]
         );
+    }
+
+    #[test]
+    fn test_rank_orders_by_score_then_name() {
+        let mut set = SortedSet::new();
+        set.add("foo", 100.0);
+        set.add("bar", 100.0);
+        set.add("baz", 20.0);
+        set.add("caz", 30.1);
+        set.add("paz", 40.2);
+
+        assert_eq!(set.rank("baz"), Some(0));
+        assert_eq!(set.rank("caz"), Some(1));
+        assert_eq!(set.rank("paz"), Some(2));
+        assert_eq!(set.rank("bar"), Some(3));
+        assert_eq!(set.rank("foo"), Some(4));
+    }
+
+    #[test]
+    fn test_rank_follows_score_updates() {
+        let mut set = SortedSet::new();
+        set.add("a", 1.0);
+        set.add("b", 2.0);
+        set.add("a", 3.0);
+
+        assert_eq!(set.rank("b"), Some(0));
+        assert_eq!(set.rank("a"), Some(1));
+    }
+
+    #[test]
+    fn test_rank_of_missing_member_is_none() {
+        let set = SortedSet::new();
+        assert_eq!(set.rank("a"), None);
     }
 
     #[test]

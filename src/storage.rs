@@ -117,6 +117,34 @@ impl Storage {
         Storage { data }
     }
 
+    /// The value at `key`, or `None` if the key is absent or expired.
+    fn live_value(&self, key: &str) -> Option<&Value> {
+        self.data
+            .get(key)
+            .filter(|stored| !stored.is_expired())
+            .map(|stored| &stored.value)
+    }
+
+    /// The stream at `key`: `Ok(None)` if the key is absent or expired,
+    /// `WRONGTYPE` if it holds another type.
+    fn stream(&self, key: &str) -> Result<Option<&Stream>, RedisError> {
+        match self.live_value(key) {
+            None => Ok(None),
+            Some(Value::Stream(stream)) => Ok(Some(stream)),
+            Some(Value::Bytes(_) | Value::SortedSet(_)) => Err(RedisError::new(WRONG_TYPE)),
+        }
+    }
+
+    /// The sorted set at `key`: `Ok(None)` if the key is absent or expired,
+    /// `WRONGTYPE` if it holds another type.
+    fn sorted_set(&self, key: &str) -> Result<Option<&SortedSet>, RedisError> {
+        match self.live_value(key) {
+            None => Ok(None),
+            Some(Value::SortedSet(sorted_set)) => Ok(Some(sorted_set)),
+            Some(Value::Bytes(_) | Value::Stream(_)) => Err(RedisError::new(WRONG_TYPE)),
+        }
+    }
+
     /// Append a stream entry with an explicit ID, creating the stream if
     /// needed. Errors with `WRONGTYPE` if `key` already holds a string or list.
     pub fn xadd(
@@ -145,13 +173,7 @@ impl Storage {
 
     /// Returns the stream stored at `key`, if a live one exists there.
     pub fn get_stream(&self, key: &str) -> Option<&Stream> {
-        match self.data.get(key) {
-            Some(stored) if !stored.is_expired() => match &stored.value {
-                Value::Stream(stream) => Some(stream),
-                Value::Bytes(_) | Value::SortedSet(_) => None,
-            },
-            _ => None,
-        }
+        self.stream(key).ok().flatten()
     }
 
     pub fn contains_stream(&self, key: &str) -> bool {
@@ -203,15 +225,16 @@ impl Storage {
             .count())
     }
 
+    /// `member`'s 0-based rank in the sorted set at `key`, or `None` when the
+    /// key is absent or expired or the member is not in the set. Errors with
+    /// `WRONGTYPE` if `key` holds another type.
+    pub fn zrank(&self, key: &str, member: &str) -> Result<Option<usize>, anyhow::Error> {
+        Ok(self.sorted_set(key)?.and_then(|sorted_set| sorted_set.rank(member)))
+    }
+
     /// Returns the sorted set stored at `key`, if a live one exists there.
     pub fn get_sorted_set(&self, key: &str) -> Option<&SortedSet> {
-        match self.data.get(key) {
-            Some(stored) if !stored.is_expired() => match &stored.value {
-                Value::SortedSet(sorted_set) => Some(sorted_set),
-                Value::Bytes(_) | Value::Stream(_) => None,
-            },
-            _ => None,
-        }
+        self.sorted_set(key).ok().flatten()
     }
 
     pub fn as_rdb_bytes(&self) -> Result<Vec<u8>, Error> {
@@ -249,14 +272,12 @@ impl Storage {
     }
 
     pub fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>, anyhow::Error> {
-        let value = match self.data.get(key) {
-            Some(stored_value) if !stored_value.is_expired() => {
-                // GET only yields byte values; streams report as absent here.
-                stored_value.string_value_as_bytes().map(|bytes| bytes.to_vec())
-            }
-            _ => None,
-        };
-        Ok(value)
+        // GET only yields byte values; streams and sorted sets report as
+        // absent here.
+        Ok(match self.live_value(key) {
+            Some(Value::Bytes(bytes)) => Some(bytes.clone()),
+            Some(Value::Stream(_) | Value::SortedSet(_)) | None => None,
+        })
     }
 
     /// Increments the integer held at `key` by one and returns the new value.
@@ -272,10 +293,7 @@ impl Storage {
     pub fn incr(&mut self, key: &str) -> Result<i64, anyhow::Error> {
         // Checked before taking the mutable borrow below so the missing-key
         // branch is free to insert through `self`.
-        let is_live = self
-            .data
-            .get(key)
-            .is_some_and(|stored_value| !stored_value.is_expired());
+        let is_live = self.live_value(key).is_some();
 
         if !is_live {
             // Absent or expired: the counter starts fresh at 1, and any expiry

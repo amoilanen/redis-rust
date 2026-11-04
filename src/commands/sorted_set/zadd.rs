@@ -74,11 +74,8 @@ impl RedisCommand for ZAdd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::{client_error_message, command_message, create_test_storage, set};
-
-    fn zadd(parts: &[&str]) -> ZAdd {
-        ZAdd { message: command_message(parts) }
-    }
+    use crate::commands::sorted_set::zadd;
+    use crate::commands::{client_error_message, create_test_storage, set};
 
     fn score(storage: &Mutex<Storage>, key: &str, member: &str) -> Option<f64> {
         storage
