@@ -7,7 +7,7 @@
 mod common;
 
 use anyhow::Result;
-use common::{find_free_port, int, null_bulk, ServerProcess};
+use common::{array, bulk, find_free_port, int, null_bulk, ServerProcess};
 
 #[test]
 fn test_zadd_creates_sorted_set_with_one_member() -> Result<()> {
@@ -99,5 +99,24 @@ fn test_zrank_errors_keep_connection_usable() -> Result<()> {
 
     assert_eq!(client.send_command(&["ZADD", "z", "1", "m"])?, "1");
     assert_eq!(client.send_command_resp(&["ZRANK", "z", "m"])?, int(0));
+    Ok(())
+}
+
+#[test]
+fn test_zrange_returns_values_in_index_range() -> Result<()> {
+    let port = find_free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    assert_eq!(client.send_command(&["ZADD", "my_key", "1.0", "a"])?, "1");
+    assert_eq!(client.send_command(&["ZADD", "my_key", "2.0", "b"])?, "1");
+    assert_eq!(client.send_command(&["ZADD", "my_key", "3.0", "c"])?, "1");
+    assert_eq!(client.send_command(&["ZADD", "my_key", "4.0", "d"])?, "1");
+    assert_eq!(client.send_command(&["ZADD", "my_key", "5.0", "e"])?, "1");
+
+    assert_eq!(
+        client.send_command_resp(&["ZRANGE", "my_key", "1", "3"])?,
+        array(vec![bulk("b"), bulk("c"), bulk("d")])
+    );
     Ok(())
 }

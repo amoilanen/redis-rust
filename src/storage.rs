@@ -232,6 +232,12 @@ impl Storage {
         Ok(self.sorted_set(key)?.and_then(|sorted_set| sorted_set.rank(member)))
     }
 
+    pub fn zrange(&self, key: &str, from: usize, to: usize) -> Result<Vec<String>, anyhow::Error> {
+        let set = self.sorted_set(key)?;
+        let elements: Vec<String> = set.map(|sorted_set| sorted_set.range(from, to)).into_iter().flatten().collect();
+        Ok(elements)
+    }
+
     /// Returns the sorted set stored at `key`, if a live one exists there.
     pub fn get_sorted_set(&self, key: &str) -> Option<&SortedSet> {
         self.sorted_set(key).ok().flatten()
