@@ -97,17 +97,31 @@ impl SortedSet {
         self.ordered.iter().position(|other| other.member == member)
     }
 
-    pub fn range(&self, from: usize, to: usize) -> Vec<String> {
-        if from >= to {
-            Vec::new()
+    /// Members at positions `start..=stop` (both inclusive) in ascending
+    /// `(score, member)` order, the way ZRANGE indexes them.
+    ///
+    /// A negative index counts from the end, `-1` being the last member. A
+    /// `start` before the first member and a `stop` past the last one are
+    /// clamped to the set; nothing is returned when `start > stop` or `start`
+    /// is past the last member.
+    ///
+    /// Skipping to `start` is O(start): like [`rank`](Self::rank), `BTreeSet`
+    /// keeps no subtree sizes to seek by position in O(log n).
+    pub fn range(&self, start: i64, stop: i64) -> impl Iterator<Item = &str> {
+        // A set can never hold anywhere near i64::MAX members.
+        let len = self.len() as i64;
+        let from_end = |index: i64| if index < 0 { index + len } else { index };
+        let start = from_end(start).max(0);
+        let stop = from_end(stop).min(len - 1);
+        // Checked before subtracting: `stop - start` could overflow when
+        // `stop` is far negative and `start` far positive.
+        let (skip, count) = if start > stop {
+            (0, 0)
         } else {
-            self.ordered.iter()
-                .skip(from)
-                .take(to.saturating_sub(from).saturating_add(1))
-                .map(|scored| {
-                    scored.member.clone()
-                }).collect()
-        }
+            // Both lie in 0..len here, so they fit a usize.
+            (start as usize, (stop - start + 1) as usize)
+        };
+        self.ordered.iter().skip(skip).take(count).map(|scored| scored.member.as_str())
     }
 
     pub fn len(&self) -> usize {
@@ -215,26 +229,72 @@ mod tests {
         assert_eq!(names, vec!["bottom", "middle", "top"]);
     }
 
-    #[test]
-    fn test_range() {
+    /// A set holding "a".."e" with scores 1.0..5.0, so position i holds the
+    /// i-th letter.
+    fn abcde() -> SortedSet {
         let mut set = SortedSet::new();
-        set.add("a", 1.0);
-        set.add("b", 2.0);
-        set.add("c", 3.0);
-        set.add("d", 4.0);
-        set.add("e", 5.0);
-        let result = set.range(1, 3);
-        assert_eq!(vec!["b", "c", "d"], result);
+        for (score, member) in [(1.0, "a"), (2.0, "b"), (3.0, "c"), (4.0, "d"), (5.0, "e")] {
+            set.add(member, score);
+        }
+        set
     }
 
+    fn range(set: &SortedSet, start: i64, stop: i64) -> Vec<&str> {
+        set.range(start, stop).collect()
+    }
 
     #[test]
-    fn test_range_to_less_than_from() {
-        let mut set = SortedSet::new();
-        set.add("a", 1.0);
-        set.add("b", 2.0);
-        set.add("c", 3.0);
-        let result = set.range(1, 0);
-        assert_eq!(Vec::<String>::new(), result);
+    fn test_range_is_inclusive_on_both_ends() {
+        assert_eq!(range(&abcde(), 1, 3), vec!["b", "c", "d"]);
+    }
+
+    #[test]
+    fn test_range_with_equal_start_and_stop_returns_one_member() {
+        let set = abcde();
+        assert_eq!(range(&set, 0, 0), vec!["a"]);
+        assert_eq!(range(&set, 2, 2), vec!["c"]);
+        assert_eq!(range(&set, 4, 4), vec!["e"]);
+    }
+
+    #[test]
+    fn test_range_with_start_after_stop_is_empty() {
+        assert!(range(&abcde(), 1, 0).is_empty());
+        assert!(range(&abcde(), -1, -2).is_empty());
+    }
+
+    #[test]
+    fn test_range_clamps_stop_past_the_end() {
+        assert_eq!(range(&abcde(), 3, 100), vec!["d", "e"]);
+        assert_eq!(range(&abcde(), 0, i64::MAX), vec!["a", "b", "c", "d", "e"]);
+    }
+
+    #[test]
+    fn test_range_with_start_past_the_end_is_empty() {
+        assert!(range(&abcde(), 5, 10).is_empty());
+        assert!(range(&abcde(), i64::MAX, i64::MAX).is_empty());
+    }
+
+    #[test]
+    fn test_range_negative_indexes_count_from_the_end() {
+        let set = abcde();
+        assert_eq!(range(&set, -2, -1), vec!["d", "e"]);
+        assert_eq!(range(&set, 0, -1), vec!["a", "b", "c", "d", "e"]);
+        assert_eq!(range(&set, -3, 3), vec!["c", "d"]);
+    }
+
+    #[test]
+    fn test_range_clamps_negative_indexes_past_the_start() {
+        let set = abcde();
+        assert_eq!(range(&set, -100, 1), vec!["a", "b"]);
+        assert!(range(&set, 0, -100).is_empty());
+        assert!(range(&set, i64::MAX, i64::MIN).is_empty());
+        assert_eq!(range(&set, i64::MIN, 0), vec!["a"]);
+    }
+
+    #[test]
+    fn test_range_of_empty_set_is_empty() {
+        let set = SortedSet::new();
+        assert!(range(&set, 0, -1).is_empty());
+        assert!(range(&set, 0, 0).is_empty());
     }
 }

@@ -232,10 +232,14 @@ impl Storage {
         Ok(self.sorted_set(key)?.and_then(|sorted_set| sorted_set.rank(member)))
     }
 
-    pub fn zrange(&self, key: &str, from: usize, to: usize) -> Result<Vec<String>, anyhow::Error> {
-        let set = self.sorted_set(key)?;
-        let elements: Vec<String> = set.map(|sorted_set| sorted_set.range(from, to)).into_iter().flatten().collect();
-        Ok(elements)
+    /// The members at positions `start..=stop` of the sorted set at `key` (see
+    /// [`SortedSet::range`]); empty if the key is absent or expired,
+    /// `WRONGTYPE` if it holds another type.
+    pub fn zrange(&self, key: &str, start: i64, stop: i64) -> Result<Vec<String>, anyhow::Error> {
+        Ok(self
+            .sorted_set(key)?
+            .map(|sorted_set| sorted_set.range(start, stop).map(str::to_owned).collect())
+            .unwrap_or_default())
     }
 
     /// Returns the sorted set stored at `key`, if a live one exists there.

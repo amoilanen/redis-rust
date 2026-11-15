@@ -1,5 +1,5 @@
-/// E2E tests for sorted set commands: ZADD, ZRANK, and their interaction
-/// with TYPE.
+/// E2E tests for sorted set commands: ZADD, ZRANK, ZRANGE, and their
+/// interaction with TYPE.
 ///
 /// Each test starts a fresh master server process, sends commands over TCP,
 /// and asserts on the RESP responses.
@@ -118,5 +118,58 @@ fn test_zrange_returns_values_in_index_range() -> Result<()> {
         client.send_command_resp(&["ZRANGE", "my_key", "1", "3"])?,
         array(vec![bulk("b"), bulk("c"), bulk("d")])
     );
+    Ok(())
+}
+
+#[test]
+fn test_zrange_edge_cases() -> Result<()> {
+    let port = find_free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    for (score, member) in [("100.0", "foo"), ("100.0", "bar"), ("20.0", "baz"), ("30.1", "caz"), ("40.2", "paz")] {
+        assert_eq!(client.send_command(&["ZADD", "zset_key", score, member])?, "1");
+    }
+
+    // Start equal to stop: exactly one member.
+    assert_eq!(client.send_command_resp(&["ZRANGE", "zset_key", "2", "2"])?, array(vec![bulk("paz")]));
+    // Stop past the end is clamped to the last member.
+    assert_eq!(
+        client.send_command_resp(&["ZRANGE", "zset_key", "3", "100"])?,
+        array(vec![bulk("bar"), bulk("foo")])
+    );
+    // Start past the end, start after stop, and a missing key are all empty.
+    assert_eq!(client.send_command_resp(&["ZRANGE", "zset_key", "5", "10"])?, array(vec![]));
+    assert_eq!(client.send_command_resp(&["ZRANGE", "zset_key", "3", "1"])?, array(vec![]));
+    assert_eq!(client.send_command_resp(&["ZRANGE", "missing_key", "0", "1"])?, array(vec![]));
+    // Negative indexes count from the end.
+    assert_eq!(
+        client.send_command_resp(&["ZRANGE", "zset_key", "-2", "-1"])?,
+        array(vec![bulk("bar"), bulk("foo")])
+    );
+    Ok(())
+}
+
+#[test]
+fn test_zrange_errors_keep_connection_usable() -> Result<()> {
+    let port = find_free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    let err = client.send_command(&["ZRANGE", "z", "0"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR wrong number of arguments for 'zrange' command");
+
+    let err = client.send_command(&["ZRANGE", "z", "zero", "1"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR value is not an integer or out of range");
+
+    assert_eq!(client.send_command(&["SET", "s", "v"])?, "OK");
+    let err = client.send_command(&["ZRANGE", "s", "0", "1"]).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "WRONGTYPE Operation against a key holding the wrong kind of value"
+    );
+
+    assert_eq!(client.send_command(&["ZADD", "z", "1", "m"])?, "1");
+    assert_eq!(client.send_command_resp(&["ZRANGE", "z", "0", "0"])?, array(vec![bulk("m")]));
     Ok(())
 }
