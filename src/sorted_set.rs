@@ -98,12 +98,16 @@ impl SortedSet {
     }
 
     pub fn range(&self, from: usize, to: usize) -> Vec<String> {
-        self.ordered.iter()
-            .skip(from)
-            .take(to.saturating_sub(from).saturating_add(1))
-            .map(|scored| {
-                scored.member.clone()
-            }).collect()
+        if from >= to {
+            Vec::new()
+        } else {
+            self.ordered.iter()
+                .skip(from)
+                .take(to.saturating_sub(from).saturating_add(1))
+                .map(|scored| {
+                    scored.member.clone()
+                }).collect()
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -221,5 +225,16 @@ mod tests {
         set.add("e", 5.0);
         let result = set.range(1, 3);
         assert_eq!(vec!["b", "c", "d"], result);
+    }
+
+
+    #[test]
+    fn test_range_to_less_than_from() {
+        let mut set = SortedSet::new();
+        set.add("a", 1.0);
+        set.add("b", 2.0);
+        set.add("c", 3.0);
+        let result = set.range(1, 0);
+        assert_eq!(Vec::<String>::new(), result);
     }
 }
