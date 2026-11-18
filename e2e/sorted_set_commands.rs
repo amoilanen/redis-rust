@@ -1,4 +1,4 @@
-/// E2E tests for sorted set commands: ZADD, ZRANK, ZRANGE, and their
+/// E2E tests for sorted set commands: ZADD, ZRANK, ZRANGE, ZCARD, and their
 /// interaction with TYPE.
 ///
 /// Each test starts a fresh master server process, sends commands over TCP,
@@ -171,5 +171,45 @@ fn test_zrange_errors_keep_connection_usable() -> Result<()> {
 
     assert_eq!(client.send_command(&["ZADD", "z", "1", "m"])?, "1");
     assert_eq!(client.send_command_resp(&["ZRANGE", "z", "0", "0"])?, array(vec![bulk("m")]));
+    Ok(())
+}
+
+#[test]
+fn test_zcard_counts_members() -> Result<()> {
+    let port = find_free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    for (score, member) in [("20.0", "zset_member1"), ("30.1", "zset_member2"), ("40.2", "zset_member3"), ("50.3", "zset_member4")] {
+        assert_eq!(client.send_command(&["ZADD", "zset_key", score, member])?, "1");
+    }
+    assert_eq!(client.send_command_resp(&["ZCARD", "zset_key"])?, int(4));
+
+    // Updating an existing member's score does not change the cardinality.
+    assert_eq!(client.send_command(&["ZADD", "zset_key", "100.0", "zset_member1"])?, "0");
+    assert_eq!(client.send_command_resp(&["ZCARD", "zset_key"])?, int(4));
+
+    assert_eq!(client.send_command_resp(&["ZCARD", "missing_key"])?, int(0));
+    Ok(())
+}
+
+#[test]
+fn test_zcard_errors_keep_connection_usable() -> Result<()> {
+    let port = find_free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    let err = client.send_command(&["ZCARD"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR wrong number of arguments for 'zcard' command");
+
+    assert_eq!(client.send_command(&["SET", "s", "v"])?, "OK");
+    let err = client.send_command(&["ZCARD", "s"]).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "WRONGTYPE Operation against a key holding the wrong kind of value"
+    );
+
+    assert_eq!(client.send_command(&["ZADD", "z", "1", "m"])?, "1");
+    assert_eq!(client.send_command_resp(&["ZCARD", "z"])?, int(1));
     Ok(())
 }

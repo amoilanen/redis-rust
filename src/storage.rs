@@ -242,6 +242,12 @@ impl Storage {
             .unwrap_or_default())
     }
 
+    /// The number of members in the sorted set at `key`; 0 if the key is
+    /// absent or expired, `WRONGTYPE` if it holds another type.
+    pub fn zcard(&self, key: &str) -> Result<usize, anyhow::Error> {
+        Ok(self.sorted_set(key)?.map_or(0, SortedSet::len))
+    }
+
     /// Returns the sorted set stored at `key`, if a live one exists there.
     pub fn get_sorted_set(&self, key: &str) -> Option<&SortedSet> {
         self.sorted_set(key).ok().flatten()
@@ -603,6 +609,20 @@ mod tests {
 
         assert_eq!(storage.zadd("k", &[ScoredMember::new(1.0, "m")])?, 1);
         assert!(storage.get_sorted_set("k").is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn test_zcard_counts_members_and_treats_missing_or_expired_as_empty() -> Result<(), anyhow::Error> {
+        let mut storage = Storage::new(HashMap::new());
+        assert_eq!(storage.zcard("z")?, 0);
+
+        storage.zadd("z", &[ScoredMember::new(1.0, "a"), ScoredMember::new(2.0, "b")])?;
+        assert_eq!(storage.zcard("z")?, 2);
+
+        storage.set("expired", b"value".to_vec(), Some(10))?;
+        thread::sleep(Duration::from_millis(30));
+        assert_eq!(storage.zcard("expired")?, 0);
         Ok(())
     }
 

@@ -6,10 +6,12 @@
 pub mod zadd;
 pub mod zrank;
 pub mod zrange;
+pub mod zcard;
 
 pub use zadd::ZAdd;
 pub use zrank::ZRank;
 pub use zrange::ZRange;
+pub use zcard::ZCard;
 
 /// Build a `ZADD` command from its parts, e.g.
 /// `zadd(&["ZADD", "z", "1", "m"])`.
