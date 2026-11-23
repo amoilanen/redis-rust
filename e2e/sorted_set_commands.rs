@@ -1,4 +1,4 @@
-/// E2E tests for sorted set commands: ZADD, ZRANK, ZRANGE, ZCARD, and their
+/// E2E tests for sorted set commands: ZADD, ZRANK, ZRANGE, ZCARD, ZSCORE, and their
 /// interaction with TYPE.
 ///
 /// Each test starts a fresh master server process, sends commands over TCP,
@@ -211,5 +211,45 @@ fn test_zcard_errors_keep_connection_usable() -> Result<()> {
 
     assert_eq!(client.send_command(&["ZADD", "z", "1", "m"])?, "1");
     assert_eq!(client.send_command_resp(&["ZCARD", "z"])?, int(1));
+    Ok(())
+}
+
+#[test]
+fn test_zscore_returns_member_scores() -> Result<()> {
+    let port = find_free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    for (score, member) in [("20.0", "zset_member1"), ("30.1", "zset_member2"), ("40.2", "zset_member3"), ("50.3", "zset_member4")] {
+        assert_eq!(client.send_command(&["ZADD", "zset_key", score, member])?, "1");
+    }
+    assert_eq!(client.send_command_resp(&["ZSCORE", "zset_key", "zset_member2"])?, bulk("30.1"));
+
+    assert_eq!(client.send_command(&["ZADD", "zset_key", "100.99", "zset_member2"])?, "0");
+    assert_eq!(client.send_command_resp(&["ZSCORE", "zset_key", "zset_member2"])?, bulk("100.99"));
+
+    assert_eq!(client.send_command_resp(&["ZSCORE", "zset_key", "zset_member100"])?, null_bulk());
+    assert_eq!(client.send_command_resp(&["ZSCORE", "missing_key", "member"])?, null_bulk());
+    Ok(())
+}
+
+#[test]
+fn test_zscore_errors_keep_connection_usable() -> Result<()> {
+    let port = find_free_port();
+    let server = ServerProcess::start_master(port);
+    let mut client = server.client();
+
+    let err = client.send_command(&["ZSCORE", "z"]).unwrap_err();
+    assert_eq!(err.to_string(), "ERR wrong number of arguments for 'zscore' command");
+
+    assert_eq!(client.send_command(&["SET", "s", "v"])?, "OK");
+    let err = client.send_command(&["ZSCORE", "s", "m"]).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "WRONGTYPE Operation against a key holding the wrong kind of value"
+    );
+
+    assert_eq!(client.send_command(&["ZADD", "z", "1", "m"])?, "1");
+    assert_eq!(client.send_command_resp(&["ZSCORE", "z", "m"])?, bulk("1"));
     Ok(())
 }

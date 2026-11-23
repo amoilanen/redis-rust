@@ -232,6 +232,13 @@ impl Storage {
         Ok(self.sorted_set(key)?.and_then(|sorted_set| sorted_set.rank(member)))
     }
 
+    /// `member`'s score in the sorted set at `key`, or `None` when the key is
+    /// absent or expired or the member is not in the set. Errors with
+    /// `WRONGTYPE` if `key` holds another type.
+    pub fn zscore(&self, key: &str, member: &str) -> Result<Option<f64>, anyhow::Error> {
+        Ok(self.sorted_set(key)?.and_then(|sorted_set| sorted_set.score(member)))
+    }
+
     /// The members at positions `start..=stop` of the sorted set at `key` (see
     /// [`SortedSet::range`]); empty if the key is absent or expired,
     /// `WRONGTYPE` if it holds another type.

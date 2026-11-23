@@ -5,7 +5,6 @@
 
 use std::str::FromStr;
 use std::sync::Mutex;
-use crate::error::RedisError;
 use crate::protocol::DataType;
 use crate::storage::Storage;
 
@@ -43,7 +42,7 @@ pub use psync::PSync;
 pub use wait::Wait;
 pub use list::{RPush, LPush, LRange, LLen, LPop, BLPop};
 pub use pubsub::{Publish, Subscribe, Unsubscribe};
-pub use sorted_set::{ZAdd, ZRank, ZRange, ZCard};
+pub use sorted_set::{ZAdd, ZRank, ZRange, ZCard, ZScore};
 pub use stream::{XAdd, XRange, XRead};
 pub use transaction::{Multi, Exec, Discard};
 pub use r#type::Type;
@@ -97,17 +96,6 @@ pub(crate) fn try_parsing<T: FromStr, E: Into<anyhow::Error>>(
     error: E,
 ) -> Result<T, anyhow::Error> {
     text.parse().map_err(|_| error.into())
-}
-
-/// Reads a sorted set score the way Redis does: any float, including `inf`,
-/// `+inf` and `-inf`, but never NaN, which has no place in an ordering.
-pub(crate) fn parse_score(argument: &str) -> Result<f64, anyhow::Error> {
-    let not_a_float = || RedisError::new("ERR value is not a valid float");
-    let score: f64 = try_parsing(argument, not_a_float())?;
-    if score.is_nan() {
-        return Err(not_a_float().into());
-    }
-    Ok(score)
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +158,7 @@ fn client_error_message(error: anyhow::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::RedisError;
 
     #[test]
     fn test_parse_command_name_valid() {
@@ -210,22 +199,5 @@ mod tests {
         let error = try_parsing::<i64, _>("soon", anyhow::anyhow!("internal")).unwrap_err();
 
         assert_eq!(error.to_string(), "internal");
-    }
-
-    #[test]
-    fn test_parse_score_accepts_floats_and_infinities() {
-        assert_eq!(parse_score("10.0").unwrap(), 10.0);
-        assert_eq!(parse_score("-1e3").unwrap(), -1000.0);
-        assert_eq!(parse_score("inf").unwrap(), f64::INFINITY);
-        assert_eq!(parse_score("+inf").unwrap(), f64::INFINITY);
-        assert_eq!(parse_score("-inf").unwrap(), f64::NEG_INFINITY);
-    }
-
-    #[test]
-    fn test_parse_score_rejects_nan_and_text() {
-        for bad in ["nan", "NaN", "abc", ""] {
-            let error = parse_score(bad).unwrap_err();
-            assert_eq!(client_error_message(error), "ERR value is not a valid float");
-        }
     }
 }

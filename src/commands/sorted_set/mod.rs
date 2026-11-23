@@ -3,15 +3,19 @@
 /// Groups every Redis command that operates on the sorted set data type
 /// (ZADD, ZRANK, ...) together with the helpers they share.
 
+mod score;
+
 pub mod zadd;
 pub mod zrank;
 pub mod zrange;
 pub mod zcard;
+pub mod zscore;
 
 pub use zadd::ZAdd;
 pub use zrank::ZRank;
 pub use zrange::ZRange;
 pub use zcard::ZCard;
+pub use zscore::ZScore;
 
 /// Build a `ZADD` command from its parts, e.g.
 /// `zadd(&["ZADD", "z", "1", "m"])`.

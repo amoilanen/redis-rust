@@ -11,7 +11,8 @@ use std::sync::Mutex;
 use anyhow::anyhow;
 use log::*;
 
-use crate::commands::{RedisCommand, parse_score};
+use crate::commands::RedisCommand;
+use crate::commands::sorted_set::score::parse_score;
 use crate::error::RedisError;
 use crate::protocol;
 use crate::protocol::DataType;
